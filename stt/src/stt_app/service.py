@@ -8,6 +8,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 from .config import CHANNELS, DTYPE, SAMPLE_RATE
+from .llm_engine import LLMEngine
 from .schemas import RecordingStatusResponse, TranscriptionResult
 from .whisper_engine import WhisperEngine
 
@@ -64,8 +65,15 @@ class ToggleRecorder:
 
 
 class SpeechToTextService:
-    def __init__(self, model_id, language, max_items: int = 100):
+    def __init__(
+        self,
+        model_id,
+        language,
+        llm_engine: Optional[LLMEngine] = None,
+        max_items: int = 100,
+    ):
         self.engine = WhisperEngine(model_id=model_id, language=language)
+        self.llm_engine = llm_engine
         self.recorder = ToggleRecorder()
         self.max_items = max_items
 
@@ -154,10 +162,28 @@ class SpeechToTextService:
             text = self.engine.transcribe(audio)
             elapsed = time.perf_counter() - started
             final_text = text if text else "(no speech recognized)"
-            self._publish(final_text, elapsed)
+            llm_response = None
+            llm_elapsed = None
+
+            if self.llm_engine is not None:
+                llm_started = time.perf_counter()
+                try:
+                    llm_response = self.llm_engine.generate(final_text)
+                except Exception as exc:
+                    llm_response = f"LLM request failed: {exc}"
+                llm_elapsed = time.perf_counter() - llm_started
+
+            self._publish(
+                text=final_text,
+                elapsed_seconds=elapsed,
+                llm_response=llm_response,
+                llm_elapsed_seconds=llm_elapsed,
+            )
             self._last_error = None
             self._last_event = "published"
             print(f"[{elapsed:.2f}s] {final_text}")
+            if llm_response:
+                print(f"[LLM] {llm_response}")
         except Exception as exc:
             self._last_error = str(exc)
             self._last_event = "error"
@@ -165,10 +191,18 @@ class SpeechToTextService:
         finally:
             self._busy.clear()
 
-    def _publish(self, text, elapsed_seconds):
+    def _publish(
+        self,
+        text,
+        elapsed_seconds,
+        llm_response: Optional[str] = None,
+        llm_elapsed_seconds: Optional[float] = None,
+    ):
         result = TranscriptionResult(
             text=text,
             elapsed_seconds=elapsed_seconds,
+            llm_response=llm_response,
+            llm_elapsed_seconds=llm_elapsed_seconds,
             created_at=datetime.now(timezone.utc),
         )
 
