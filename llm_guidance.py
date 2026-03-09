@@ -1,10 +1,11 @@
 # llm_guidance/guidance.py
 from openai import OpenAI
+import os
 
 # VT ARC OpenAI-compatible API
 # Get your API key from: https://llm.arc.vt.edu → Profile > Settings > Account > API Keys
 client = OpenAI(
-    api_key="sk-e0d2f10dcc1048b6bb1b1546cbfe89c2",
+    api_key=os.environ.get("ARC_API_KEY"),
     base_url="https://llm-api.arc.vt.edu/api/v1"
 )
 
