@@ -1,9 +1,9 @@
 import uvicorn
-from stt_app.api import create_app
-from stt_app.config import AppConfig
-from stt_app.llm_engine import LLMEngine
-from stt_app.service import SpeechToTextService
-from stt_app.tts_engine import TTSEngine
+from stt.src.stt_app.api import create_app
+from stt.src.stt_app.config import AppConfig
+from llm.llm_engine import LLMEngine
+from stt.src.stt_app.service import SpeechToTextService
+from tts.tts_engine import TTSEngine
 import argparse
 
 

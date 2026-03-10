@@ -12,9 +12,9 @@ import sounddevice as sd
 from pynput import keyboard
 
 from .config import CHANNELS, DTYPE, SAMPLE_RATE
-from .llm_engine import LLMEngine
+from llm.llm_engine import LLMEngine
 from .schemas import RecordingStatusResponse, TranscriptionResult
-from .tts_engine import TTSEngine
+from tts.tts_engine import TTSEngine
 from .whisper_engine import WhisperEngine
 
 
