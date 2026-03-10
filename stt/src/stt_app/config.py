@@ -14,6 +14,16 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(slots=True)
 class AppConfig:
     model_id = "openai/whisper-medium"
@@ -26,3 +36,8 @@ class AppConfig:
         or os.getenv("ARC_API_KEY")
         or os.getenv("OPENAI_API_KEY")
     )
+    tts_enabled = _env_flag("TTS_ENABLED", True)
+    tts_voice = os.getenv("TTS_VOICE", "af_heart")
+    tts_lang_code = os.getenv("TTS_LANG_CODE", "a")
+    tts_sample_rate = _env_int("TTS_SAMPLE_RATE", 24000)
+    tts_output_dir = os.getenv("TTS_OUTPUT_DIR", "stt/output_audio")

@@ -9,6 +9,11 @@ class TranscriptionResult(BaseModel):
     elapsed_seconds: float = Field(ge=0)
     llm_response: str | None = None
     llm_elapsed_seconds: float | None = Field(default=None, ge=0)
+    tts_generated: bool = False
+    tts_elapsed_seconds: float | None = Field(default=None, ge=0)
+    tts_error: str | None = None
+    tts_wav_path: str | None = None
+    tts_mp3_path: str | None = None
     created_at: datetime
 
 

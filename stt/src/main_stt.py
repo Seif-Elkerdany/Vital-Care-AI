@@ -3,6 +3,7 @@ from stt_app.api import create_app
 from stt_app.config import AppConfig
 from stt_app.llm_engine import LLMEngine
 from stt_app.service import SpeechToTextService
+from stt_app.tts_engine import TTSEngine
 import argparse
 
 
@@ -38,6 +39,32 @@ def parse_args():
         help="API key for the LLM provider.",
     )
     parser.add_argument(
+        "--disable-tts",
+        action="store_true",
+        help="Disable TTS generation for LLM responses.",
+    )
+    parser.add_argument(
+        "--tts-voice",
+        default=AppConfig.tts_voice,
+        help="Voice id for Kokoro TTS.",
+    )
+    parser.add_argument(
+        "--tts-lang-code",
+        default=AppConfig.tts_lang_code,
+        help="Language code for Kokoro pipeline.",
+    )
+    parser.add_argument(
+        "--tts-sample-rate",
+        type=int,
+        default=AppConfig.tts_sample_rate,
+        help="WAV sample rate for generated TTS audio.",
+    )
+    parser.add_argument(
+        "--tts-output-dir",
+        default=AppConfig.tts_output_dir,
+        help="Directory where generated TTS WAV/MP3 files are saved.",
+    )
+    parser.add_argument(
         "--host",
         default="0.0.0.0",
         help="Host interface for FastAPI server.",
@@ -67,10 +94,20 @@ def main():
             api_key=args.llm_api_key,
         )
 
+    tts_engine = None
+    if AppConfig.tts_enabled and not args.disable_tts:
+        tts_engine = TTSEngine(
+            voice=args.tts_voice,
+            lang_code=args.tts_lang_code,
+            sample_rate=args.tts_sample_rate,
+        )
+
     service = SpeechToTextService(
         model_id=args.model,
         language=args.language,
         llm_engine=llm_engine,
+        tts_engine=tts_engine,
+        tts_output_dir=args.tts_output_dir,
     )
     app = create_app(service)
     print("Server starting. Focus this terminal and press M to start/stop recording.")

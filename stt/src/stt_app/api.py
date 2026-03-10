@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import Response
 
 from .schemas import (
     HealthResponse,
@@ -59,5 +60,37 @@ def create_app(stt_service):
             response=latest.llm_response,
             created_at=latest.created_at,
         )
+
+    @app.get("/responses/latest/audio")
+    async def latest_response_audio():
+        latest = stt_service.latest()
+        if latest is None:
+            raise HTTPException(status_code=404, detail="No transcription has been published yet.")
+        if not latest.llm_response:
+            raise HTTPException(status_code=404, detail="LLM response is not available for latest transcription.")
+
+        audio_wav = stt_service.latest_response_audio()
+        if audio_wav is None:
+            if latest.tts_error:
+                raise HTTPException(status_code=503, detail=latest.tts_error)
+            raise HTTPException(status_code=404, detail="TTS audio is not available for latest LLM response.")
+
+        return Response(content=audio_wav, media_type="audio/wav")
+
+    @app.get("/responses/latest/audio/mp3")
+    async def latest_response_audio_mp3():
+        latest = stt_service.latest()
+        if latest is None:
+            raise HTTPException(status_code=404, detail="No transcription has been published yet.")
+        if not latest.llm_response:
+            raise HTTPException(status_code=404, detail="LLM response is not available for latest transcription.")
+
+        audio_mp3 = stt_service.latest_response_audio_mp3()
+        if audio_mp3 is None:
+            if latest.tts_error:
+                raise HTTPException(status_code=503, detail=latest.tts_error)
+            raise HTTPException(status_code=404, detail="MP3 audio is not available for latest LLM response.")
+
+        return Response(content=audio_mp3, media_type="audio/mpeg")
 
     return app

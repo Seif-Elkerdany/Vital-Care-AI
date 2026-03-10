@@ -1,5 +1,9 @@
+import io
+from pathlib import Path
+import subprocess
 import threading
 import time
+from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,6 +14,7 @@ from pynput import keyboard
 from .config import CHANNELS, DTYPE, SAMPLE_RATE
 from .llm_engine import LLMEngine
 from .schemas import RecordingStatusResponse, TranscriptionResult
+from .tts_engine import TTSEngine
 from .whisper_engine import WhisperEngine
 
 
@@ -70,17 +75,24 @@ class SpeechToTextService:
         model_id,
         language,
         llm_engine: Optional[LLMEngine] = None,
+        tts_engine: Optional[TTSEngine] = None,
+        tts_output_dir: Optional[str] = None,
         max_items: int = 100,
     ):
         self.engine = WhisperEngine(model_id=model_id, language=language)
         self.llm_engine = llm_engine
+        self.tts_engine = tts_engine
+        self.tts_output_dir = Path(tts_output_dir).expanduser() if tts_output_dir else None
         self.recorder = ToggleRecorder()
         self.max_items = max_items
 
         self._items = []
         self._items_lock = threading.Lock()
+        self._tts_audio_lock = threading.Lock()
+        self._latest_tts_audio = None
+        self._latest_tts_audio_created_at = None
         self._busy = threading.Event()
-        self._last_error= None
+        self._last_error = None
         self._last_event = "idle"
 
         self._listener = None
@@ -164,6 +176,11 @@ class SpeechToTextService:
             final_text = text if text else "(no speech recognized)"
             llm_response = None
             llm_elapsed = None
+            tts_elapsed = None
+            tts_error = None
+            tts_audio_wav = None
+            tts_wav_path = None
+            tts_mp3_path = None
 
             if self.llm_engine is not None:
                 llm_started = time.perf_counter()
@@ -173,17 +190,43 @@ class SpeechToTextService:
                     llm_response = f"LLM request failed: {exc}"
                 llm_elapsed = time.perf_counter() - llm_started
 
+            if (
+                self.tts_engine is not None
+                and llm_response
+                and not llm_response.startswith("LLM request failed:")
+            ):
+                tts_started = time.perf_counter()
+                try:
+                    tts_audio_wav = self.tts_engine.synthesize(llm_response)
+                except Exception as exc:
+                    tts_error = f"TTS request failed: {exc}"
+                tts_elapsed = time.perf_counter() - tts_started
+
+            if tts_audio_wav is not None:
+                tts_wav_path, tts_mp3_path, save_error = self._save_tts_outputs(tts_audio_wav)
+                if save_error:
+                    tts_error = f"{tts_error}; {save_error}" if tts_error else save_error
+
             self._publish(
                 text=final_text,
                 elapsed_seconds=elapsed,
                 llm_response=llm_response,
                 llm_elapsed_seconds=llm_elapsed,
+                tts_elapsed_seconds=tts_elapsed,
+                tts_error=tts_error,
+                tts_audio_wav=tts_audio_wav,
+                tts_wav_path=tts_wav_path,
+                tts_mp3_path=tts_mp3_path,
             )
             self._last_error = None
             self._last_event = "published"
             print(f"[{elapsed:.2f}s] {final_text}")
             if llm_response:
                 print(f"[LLM] {llm_response}")
+            if tts_audio_wav is not None:
+                print("[TTS] Synthesized latest LLM response to audio.")
+            elif tts_error:
+                print(f"[TTS] {tts_error}")
         except Exception as exc:
             self._last_error = str(exc)
             self._last_event = "error"
@@ -197,12 +240,22 @@ class SpeechToTextService:
         elapsed_seconds,
         llm_response: Optional[str] = None,
         llm_elapsed_seconds: Optional[float] = None,
+        tts_elapsed_seconds: Optional[float] = None,
+        tts_error: Optional[str] = None,
+        tts_audio_wav: Optional[bytes] = None,
+        tts_wav_path: Optional[str] = None,
+        tts_mp3_path: Optional[str] = None,
     ):
         result = TranscriptionResult(
             text=text,
             elapsed_seconds=elapsed_seconds,
             llm_response=llm_response,
             llm_elapsed_seconds=llm_elapsed_seconds,
+            tts_generated=tts_audio_wav is not None,
+            tts_elapsed_seconds=tts_elapsed_seconds,
+            tts_error=tts_error,
+            tts_wav_path=tts_wav_path,
+            tts_mp3_path=tts_mp3_path,
             created_at=datetime.now(timezone.utc),
         )
 
@@ -210,6 +263,10 @@ class SpeechToTextService:
             self._items.append(result)
             if len(self._items) > self.max_items:
                 self._items = self._items[-self.max_items :]
+
+        with self._tts_audio_lock:
+            self._latest_tts_audio = tts_audio_wav
+            self._latest_tts_audio_created_at = result.created_at if tts_audio_wav is not None else None
 
         return result
 
@@ -224,6 +281,106 @@ class SpeechToTextService:
             return []
         with self._items_lock:
             return list(self._items[-limit:])
+
+    def latest_response_audio(self):
+        latest = self.latest()
+        if latest is None:
+            return None
+
+        with self._tts_audio_lock:
+            if self._latest_tts_audio is None:
+                pass
+            elif self._latest_tts_audio_created_at == latest.created_at:
+                return self._latest_tts_audio
+
+        wav_path = latest.tts_wav_path
+        if not wav_path:
+            return None
+
+        path = Path(wav_path)
+        if not path.is_file():
+            return None
+        return path.read_bytes()
+
+    def latest_response_audio_mp3(self):
+        latest = self.latest()
+        if latest is None:
+            return None
+
+        mp3_path = latest.tts_mp3_path
+        if not mp3_path:
+            return None
+
+        path = Path(mp3_path)
+        if not path.is_file():
+            return None
+        return path.read_bytes()
+
+    def _save_tts_outputs(self, wav_bytes: bytes) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        if self.tts_output_dir is None:
+            return None, None, "TTS output directory is not configured."
+
+        try:
+            self.tts_output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return None, None, f"TTS output directory creation failed: {exc}"
+
+        stem = f"tts_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}_{uuid4().hex[:8]}"
+        wav_path = self.tts_output_dir / f"{stem}.wav"
+        mp3_path = self.tts_output_dir / f"{stem}.mp3"
+
+        try:
+            wav_path.write_bytes(wav_bytes)
+        except Exception as exc:
+            return None, None, f"TTS WAV save failed: {exc}"
+
+        try:
+            self._convert_wav_to_mp3(wav_bytes=wav_bytes, mp3_path=mp3_path)
+        except Exception as exc:
+            return str(wav_path.resolve()), None, f"TTS MP3 save failed: {exc}"
+
+        return str(wav_path.resolve()), str(mp3_path.resolve()), None
+
+    def _convert_wav_to_mp3(self, wav_bytes: bytes, mp3_path: Path):
+        conversion_error = None
+        try:
+            import soundfile as sf
+
+            audio, sample_rate = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+            sf.write(str(mp3_path), audio, sample_rate, format="MP3")
+            return
+        except Exception as exc:
+            conversion_error = exc
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "wav",
+            "-i",
+            "pipe:0",
+            str(mp3_path),
+        ]
+        try:
+            process = subprocess.run(
+                cmd,
+                input=wav_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"MP3 conversion failed (soundfile: {conversion_error}, ffmpeg: {exc})"
+            ) from exc
+
+        if process.returncode != 0:
+            stderr = process.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"MP3 conversion failed (soundfile: {conversion_error}, ffmpeg: {stderr or process.returncode})"
+            )
 
     def status(self):
         latest = self.latest()

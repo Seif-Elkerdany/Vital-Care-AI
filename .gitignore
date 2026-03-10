@@ -24,3 +24,5 @@ kokoro/
 .idea/
 .DS_Store
 Thumbs.db
+
+/stt/output_audio
