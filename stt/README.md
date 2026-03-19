@@ -14,7 +14,6 @@ It can call an LLM after each transcript (`STT -> LLM`) and synthesize the LLM a
 
 ## Project Structure
 - `main_stt.py`: primary app entry point
-- `stt/src/main_stt.py`: wrapper entry point inside the STT folder
 - `stt/src/stt_app/service.py`: recording + hotkey + transcription orchestration
 - `stt/src/stt_app/api.py`: FastAPI endpoints
 - `stt/src/stt_app/config.py`: runtime defaults and env-driven settings
@@ -32,12 +31,7 @@ pip install -r stt/requirements.txt
 
 2. Start server:
 ```bash
-python main_stt.py --host 0.0.0.0 --port 8000
-```
-
-Alternative wrapper:
-```bash
-python stt/src/main_stt.py --host 0.0.0.0 --port 8000
+python main.py --host 0.0.0.0 --port 8000
 ```
 
 3. Use hotkey recording:
@@ -79,7 +73,7 @@ Environment variables:
 
 CLI flags:
 ```bash
-python main_stt.py \
+python main.py \
   --llm-model gpt-oss-120b \
   --llm-base-url https://llm-api.arc.vt.edu/api/v1 \
   --llm-api-key "$ARC_API_KEY"
@@ -87,7 +81,7 @@ python main_stt.py \
 
 Disable LLM chaining:
 ```bash
-python main_stt.py --disable-llm
+python main.py --disable-llm
 ```
 
 ## TTS Configuration
@@ -100,7 +94,7 @@ Environment variables:
 
 CLI flags:
 ```bash
-python main_stt.py \
+python main.py \
   --tts-voice af_heart \
   --tts-lang-code a \
   --tts-sample-rate 24000 \
@@ -109,7 +103,7 @@ python main_stt.py \
 
 Disable TTS generation:
 ```bash
-python main_stt.py --disable-tts
+python main.py --disable-tts
 ```
 
 ## Notes
