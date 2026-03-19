@@ -13,11 +13,15 @@ It can call an LLM after each transcript (`STT -> LLM`) and synthesize the LLM a
 - You can read the latest transcription from API endpoints.
 
 ## Project Structure
-- `stt/src/main_stt.py`: app entry point (start server here)
-- `stt/src/stt_app/service.py`: recording + hotkey + transcription logic
+- `main_stt.py`: primary app entry point
+- `stt/src/main_stt.py`: wrapper entry point inside the STT folder
+- `stt/src/stt_app/service.py`: recording + hotkey + transcription orchestration
 - `stt/src/stt_app/api.py`: FastAPI endpoints
+- `stt/src/stt_app/config.py`: runtime defaults and env-driven settings
+- `stt/src/stt_app/schemas.py`: API/response models
 - `stt/src/stt_app/whisper_engine.py`: Whisper model loading/inference
-- `stt/src/stt_app/tts_engine.py`: Kokoro-based text-to-speech engine
+- `tts/tts_engine.py`: Kokoro-based text-to-speech engine
+- `stt/tests/test_service.py`: regression tests for the STT pipeline
 - `stt/requirements.txt`: Python dependencies
 
 ## Quick Start
@@ -27,6 +31,11 @@ pip install -r stt/requirements.txt
 ```
 
 2. Start server:
+```bash
+python main_stt.py --host 0.0.0.0 --port 8000
+```
+
+Alternative wrapper:
 ```bash
 python stt/src/main_stt.py --host 0.0.0.0 --port 8000
 ```
@@ -70,7 +79,7 @@ Environment variables:
 
 CLI flags:
 ```bash
-python stt/src/main_stt.py \
+python main_stt.py \
   --llm-model gpt-oss-120b \
   --llm-base-url https://llm-api.arc.vt.edu/api/v1 \
   --llm-api-key "$ARC_API_KEY"
@@ -78,7 +87,7 @@ python stt/src/main_stt.py \
 
 Disable LLM chaining:
 ```bash
-python stt/src/main_stt.py --disable-llm
+python main_stt.py --disable-llm
 ```
 
 ## TTS Configuration
@@ -91,7 +100,7 @@ Environment variables:
 
 CLI flags:
 ```bash
-python stt/src/main_stt.py \
+python main_stt.py \
   --tts-voice af_heart \
   --tts-lang-code a \
   --tts-sample-rate 24000 \
@@ -100,7 +109,7 @@ python stt/src/main_stt.py \
 
 Disable TTS generation:
 ```bash
-python stt/src/main_stt.py --disable-tts
+python main_stt.py --disable-tts
 ```
 
 ## Notes

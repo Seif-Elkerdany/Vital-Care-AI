@@ -1,8 +1,6 @@
 import threading
 
 import numpy as np
-import torch
-from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from .config import SAMPLE_RATE
 
@@ -10,17 +8,35 @@ from .config import SAMPLE_RATE
 class WhisperEngine:
     def __init__(self, model_id, language):
         self.language = language
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.dtype = torch.float16 if self.device == "cuda" else torch.float32
         self.lock = threading.Lock()
+        self._torch = self._load_torch()
+        self.device = "cuda" if self._torch.cuda.is_available() else "cpu"
+        self.dtype = self._torch.float16 if self.device == "cuda" else self._torch.float32
 
-        self.processor = WhisperProcessor.from_pretrained(model_id)
-        self.model = WhisperForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype=self.dtype,
-        ).to(self.device)
+        processor_class, model_class = self._load_whisper_classes()
+        self.processor = processor_class.from_pretrained(model_id)
+        self.model = model_class.from_pretrained(model_id, torch_dtype=self.dtype).to(self.device)
         self.model.eval()
         self.model.config.forced_decoder_ids = None
+
+    def _load_torch(self):
+        try:
+            import torch
+        except Exception as exc:
+            raise RuntimeError(
+                "Whisper transcription requires the `torch` package. Install STT dependencies first."
+            ) from exc
+        return torch
+
+    def _load_whisper_classes(self):
+        try:
+            from transformers import WhisperForConditionalGeneration, WhisperProcessor
+        except Exception as exc:
+            raise RuntimeError(
+                "Whisper transcription requires the `transformers` package. Install STT dependencies first."
+            ) from exc
+
+        return WhisperProcessor, WhisperForConditionalGeneration
 
     def transcribe(self, audio_int16):
         audio_f32 = audio_int16.astype(np.float32) / 32768.0
@@ -38,7 +54,7 @@ class WhisperEngine:
                 task="transcribe",
             )
 
-        with self.lock, torch.inference_mode():
+        with self.lock, self._torch.inference_mode():
             predicted_ids = self.model.generate(
                 input_features,
                 forced_decoder_ids=forced_decoder_ids,

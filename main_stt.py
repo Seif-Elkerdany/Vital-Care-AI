@@ -1,10 +1,6 @@
-import uvicorn
-from stt.src.stt_app.api import create_app
-from stt.src.stt_app.config import AppConfig
-from llm.llm_engine import LLMEngine
-from stt.src.stt_app.service import SpeechToTextService
-from tts.tts_engine import TTSEngine
 import argparse
+from llm.llm_engine import LLMEngine
+from stt.src.stt_app import AppConfig, SpeechToTextService
 
 
 def parse_args():
@@ -83,9 +79,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-
+def build_service(args) -> SpeechToTextService:
     llm_engine = None
     if AppConfig.llm_enabled and not args.disable_llm:
         llm_engine = LLMEngine(
@@ -96,19 +90,29 @@ def main():
 
     tts_engine = None
     if AppConfig.tts_enabled and not args.disable_tts:
+        from tts.tts_engine import TTSEngine
+
         tts_engine = TTSEngine(
             voice=args.tts_voice,
             lang_code=args.tts_lang_code,
             sample_rate=args.tts_sample_rate,
         )
 
-    service = SpeechToTextService(
+    return SpeechToTextService(
         model_id=args.model,
         language=args.language,
         llm_engine=llm_engine,
         tts_engine=tts_engine,
         tts_output_dir=args.tts_output_dir,
     )
+
+
+def main():
+    args = parse_args()
+    import uvicorn
+    from stt.src.stt_app.api import create_app
+
+    service = build_service(args)
     app = create_app(service)
     print("Server starting. Focus this terminal and press M to start/stop recording.")
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
