@@ -1,13 +1,13 @@
 from fastapi import FastAPI
 
 from api.controller import TTSController
-from bootstrap import build_container
+from tts.bootstrap import build_container
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="TTS service (text-only)")
     container = build_container()
-    controller = TTSController(orchestrator=container.pipeline_orchestrator)
+    controller = TTSController(service=container.tts_service)
 
     @app.get("/")
     async def root() -> dict[str, str]:

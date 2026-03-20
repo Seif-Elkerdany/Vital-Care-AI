@@ -3,7 +3,7 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-from tts.contracts import AudioChunk, RawPipelineChunk, Synthesizer
+from .contracts import AudioChunk, RawPipelineChunk, Synthesizer
 
 
 class KokoroSynthesizer(Synthesizer):

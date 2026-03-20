@@ -7,9 +7,9 @@ from typing import Any, Iterable, Optional
 
 import numpy as np
 
-from tts.config import TTSConfig
-from tts.contracts import AudioChunk, Synthesizer, WavEncoder
-from tts.encoders import SoundFileWavEncoder
+from .config import TTSConfig
+from .contracts import AudioChunk, Synthesizer, WavEncoder
+from .encoders import SoundFileWavEncoder
 
 
 class TTSService:
