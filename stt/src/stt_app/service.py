@@ -249,9 +249,13 @@ class SpeechToTextService:
         final_text = (text or "").strip() or "(no speech recognized)"
 
         llm_response, llm_elapsed = self._generate_llm_response(final_text)
-        tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(llm_response)
+        tts_input = llm_response or final_text
+        tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
         tts_wav_path = None
         tts_mp3_path = None
+
+        if llm_response is None and self.tts_engine is not None:
+            llm_response = "[LLM disabled] Using transcript text for TTS."
 
         if tts_audio_wav is not None:
             tts_wav_path, tts_mp3_path, save_error = self._save_tts_outputs(tts_audio_wav)

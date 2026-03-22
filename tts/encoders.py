@@ -3,7 +3,7 @@ import io
 import numpy as np
 import soundfile as sf
 
-from tts.contracts import WavEncoder
+from .contracts import WavEncoder
 
 
 class SoundFileWavEncoder(WavEncoder):

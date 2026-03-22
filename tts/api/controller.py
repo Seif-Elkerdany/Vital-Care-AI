@@ -3,13 +3,13 @@ import asyncio
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
-from api.models import SynthesizeRequest
-from pipeline.orchestrator import VoicePipelineOrchestrator
+from .models import SynthesizeRequest
+from tts.service import TTSService
 
 
 class TTSController:
-    def __init__(self, orchestrator: VoicePipelineOrchestrator):
-        self._orchestrator = orchestrator
+    def __init__(self, service: TTSService):
+        self._service = service
 
     async def synthesize_rest(self, payload: SynthesizeRequest) -> Response:
         text = payload.text.strip()
@@ -17,7 +17,7 @@ class TTSController:
             raise HTTPException(status_code=400, detail="Empty text")
 
         loop = asyncio.get_event_loop()
-        wav_bytes = await loop.run_in_executor(None, self._orchestrator.text_to_speech, text)
+        wav_bytes = await loop.run_in_executor(None, self._service.synthesize_bytes, text)
         return Response(content=wav_bytes, media_type="audio/wav")
 
     async def synthesize_get(self, text: str) -> Response:
@@ -26,7 +26,7 @@ class TTSController:
             raise HTTPException(status_code=400, detail="Query param 'text' is required")
 
         loop = asyncio.get_event_loop()
-        wav_bytes = await loop.run_in_executor(None, self._orchestrator.text_to_speech, value)
+        wav_bytes = await loop.run_in_executor(None, self._service.synthesize_bytes, value)
         return Response(content=wav_bytes, media_type="audio/wav")
 
     async def tts_websocket(self, websocket: WebSocket) -> None:
@@ -47,7 +47,7 @@ class TTSController:
 
             async_queue: asyncio.Queue = asyncio.Queue()
             running_loop = asyncio.get_running_loop()
-            self._orchestrator.stream_text_to_speech(text, async_queue, running_loop)
+            self._service.stream_to_async_queue(text, async_queue, running_loop)
 
             while True:
                 item = await async_queue.get()
