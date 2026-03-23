@@ -151,6 +151,123 @@ Run commands from the project root:
 python -m rag.test <command> [arguments]
 ```
 
+## Run In CLI Step By Step
+
+This is the easiest full workflow to test the module from the terminal.
+
+### Step 1: Start Qdrant
+
+From the project root:
+
+```bash
+docker compose up -d
+```
+
+This starts the Qdrant server on:
+
+```text
+http://localhost:6333
+```
+
+### Step 2: Install the Python dependencies
+
+```bash
+pip install -r rag/requirements.txt
+```
+
+### Step 3: Add a PDF to Qdrant
+
+```bash
+python -m rag.test add "C:\path\to\your.pdf"
+```
+
+If you want to add more than one PDF in one command:
+
+```bash
+python -m rag.test add "C:\path\to\file1.pdf" "C:\path\to\file2.pdf"
+```
+
+After indexing, the command prints JSON containing:
+
+- `document_id`
+- `document_name`
+- `source_path`
+- `file_hash`
+- `total_pages`
+- `indexed_pages`
+- `total_chunks`
+
+Save the returned `document_id` if you want exact deletion later.
+
+### Step 4: List the indexed PDFs
+
+```bash
+python -m rag.test list
+```
+
+This shows the PDFs currently stored in the Qdrant collection. Use this if you want to:
+
+- confirm that indexing worked
+- get the `document_id`
+- see how many chunks were stored for each PDF
+
+### Step 5: Search the indexed PDFs
+
+```bash
+python -m rag.test search "What are the symptoms of diabetes?" --top-k 5
+```
+
+This returns the most relevant chunks from the indexed PDFs.
+
+Important: this is retrieval only. It does not generate a final answer with an LLM yet.
+
+Each result includes:
+
+- `score`
+- `text`
+- `metadata`
+
+The metadata tells you exactly which PDF and page the chunk came from.
+
+### Step 6: Delete by PDF file name
+
+```bash
+python -m rag.test delete-name "your.pdf"
+```
+
+Use this when you want to remove all chunks that belong to a PDF with that exact file name.
+
+### Step 7: Delete by document ID
+
+```bash
+python -m rag.test delete-id "your-document-id"
+```
+
+Use this when you want precise deletion of one indexed document record.
+
+### Full Example Workflow
+
+```bash
+docker compose up -d
+pip install -r rag/requirements.txt
+python -m rag.test add "C:\docs\lecture1.pdf"
+python -m rag.test list
+python -m rag.test search "Explain NLP tokenization" --top-k 3
+python -m rag.test delete-name "lecture1.pdf"
+```
+
+### Recommended Testing Order
+
+When testing this module manually, use this order:
+
+1. Start Qdrant
+2. Install dependencies
+3. Add one PDF
+4. Run `list`
+5. Run `search`
+6. Run `delete-name` or `delete-id`
+7. Run `list` again to confirm deletion
+
 ### Add one or more PDFs
 
 ```bash
