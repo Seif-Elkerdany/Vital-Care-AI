@@ -7,6 +7,7 @@ from .schemas import (
     HealthResponse,
     LLMResponseResult,
     RecordingStatusResponse,
+    TextInputRequest,
     ToggleRecordingResponse,
     TranscriptionListResponse,
     TranscriptionResult,
@@ -59,6 +60,10 @@ def create_app(stt_service):
     @app.get("/transcriptions", response_model=TranscriptionListResponse)
     async def list_transcriptions(limit=Query(default=20, ge=1, le=100)):
         return TranscriptionListResponse(items=stt_service.list_items(limit=limit))
+
+    @app.post("/pipeline/text", response_model=TranscriptionResult)
+    async def process_text(body: TextInputRequest):
+        return stt_service.process_text_input(body.text)
 
     @app.get("/responses/latest", response_model=LLMResponseResult)
     async def latest_response():

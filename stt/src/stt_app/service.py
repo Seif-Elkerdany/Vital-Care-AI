@@ -5,7 +5,7 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Any
 from uuid import uuid4
 
 import numpy as np
@@ -16,6 +16,7 @@ from .whisper_engine import WhisperEngine
 
 if TYPE_CHECKING:
     from llm.llm_engine import LLMEngine
+    from pipeline import LLMRAGPipeline
     from tts.tts_engine import TTSEngine
 
 
@@ -109,6 +110,7 @@ class SpeechToTextService:
         model_id,
         language,
         llm_engine: Optional["LLMEngine"] = None,
+        pipeline_engine: Optional["LLMRAGPipeline"] = None,
         tts_engine: Optional["TTSEngine"] = None,
         tts_output_dir: Optional[str] = None,
         max_items: int = 100,
@@ -118,6 +120,7 @@ class SpeechToTextService:
     ):
         self.engine = engine or WhisperEngine(model_id=model_id, language=language)
         self.llm_engine = llm_engine
+        self.pipeline_engine = pipeline_engine
         self.tts_engine = tts_engine
         self.tts_output_dir = Path(tts_output_dir).expanduser() if tts_output_dir else None
         self.recorder = recorder or AudioRecorder()
@@ -248,8 +251,53 @@ class SpeechToTextService:
         elapsed = time.perf_counter() - started
         final_text = (text or "").strip() or "(no speech recognized)"
 
-        llm_response, llm_elapsed = self._generate_llm_response(final_text)
-        tts_input = llm_response or final_text
+        return self._process_text(final_text, transcription_elapsed=elapsed)
+
+    def process_text_input(self, text: str) -> TranscriptionResult:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            raise ValueError("Text input must be non-empty.")
+
+        if self._busy.is_set():
+            raise RuntimeError("Another transcription is already running. Please wait.")
+
+        self._busy.set()
+        self._last_event = "transcribing"
+        try:
+            result = self._process_text(cleaned, transcription_elapsed=0.0)
+            self._last_error = None
+            self._last_event = "published"
+            return result
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._last_event = "error"
+            raise
+        finally:
+            self._busy.clear()
+
+    def _process_text(self, input_text: str, *, transcription_elapsed: float) -> TranscriptionResult:
+        pipeline_elapsed = None
+        structured_query = None
+        retrievals = None
+        rag_error = None
+
+        if self.pipeline_engine is not None:
+            pipeline_started = time.perf_counter()
+            try:
+                pipeline_result = self.pipeline_engine.run(input_text)
+                structured_query = pipeline_result.structured_query
+                retrievals = pipeline_result.retrievals
+                rag_error = pipeline_result.rag_error
+                llm_response = pipeline_result.final_answer
+            except Exception as exc:
+                rag_error = rag_error or str(exc)
+                llm_response = f"Pipeline failed: {exc}"
+            pipeline_elapsed = time.perf_counter() - pipeline_started
+            llm_elapsed = pipeline_elapsed
+        else:
+            llm_response, llm_elapsed = self._generate_llm_response(input_text)
+
+        tts_input = llm_response or input_text
         tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
         tts_wav_path = None
         tts_mp3_path = None
@@ -263,10 +311,14 @@ class SpeechToTextService:
                 tts_error = f"{tts_error}; {save_error}" if tts_error else save_error
 
         return self._publish(
-            text=final_text,
-            elapsed_seconds=elapsed,
+            text=input_text,
+            elapsed_seconds=transcription_elapsed,
             llm_response=llm_response,
             llm_elapsed_seconds=llm_elapsed,
+            pipeline_elapsed_seconds=pipeline_elapsed,
+            structured_query=structured_query,
+            retrievals=retrievals,
+            rag_error=rag_error,
             tts_elapsed_seconds=tts_elapsed,
             tts_error=tts_error,
             tts_audio_wav=tts_audio_wav,
@@ -292,6 +344,7 @@ class SpeechToTextService:
             self.tts_engine is None
             or not llm_response
             or llm_response.startswith("LLM request failed:")
+            or llm_response.startswith("Pipeline failed:")
         ):
             return None, None, None
 
@@ -310,6 +363,10 @@ class SpeechToTextService:
         elapsed_seconds,
         llm_response: Optional[str] = None,
         llm_elapsed_seconds: Optional[float] = None,
+        pipeline_elapsed_seconds: Optional[float] = None,
+        structured_query: Optional[str] = None,
+        retrievals: Optional[list[dict[str, Any]]] = None,
+        rag_error: Optional[str] = None,
         tts_elapsed_seconds: Optional[float] = None,
         tts_error: Optional[str] = None,
         tts_audio_wav: Optional[bytes] = None,
@@ -321,6 +378,10 @@ class SpeechToTextService:
             elapsed_seconds=elapsed_seconds,
             llm_response=llm_response,
             llm_elapsed_seconds=llm_elapsed_seconds,
+            pipeline_elapsed_seconds=pipeline_elapsed_seconds,
+            structured_query=structured_query,
+            retrievals=retrievals,
+            rag_error=rag_error,
             tts_generated=tts_audio_wav is not None,
             tts_elapsed_seconds=tts_elapsed_seconds,
             tts_error=tts_error,

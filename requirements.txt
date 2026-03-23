@@ -1,0 +1,4 @@
+-r stt/requirements.txt
+-r rag/requirements.txt
+-r tts/requirements.txt
+google-genai

@@ -1,5 +1,4 @@
 import argparse
-from llm.llm_engine import LLMEngine
 from stt.src.stt_app import AppConfig, SpeechToTextService
 
 
@@ -20,6 +19,17 @@ def parse_args():
         help="Disable the LLM call after transcription.",
     )
     parser.add_argument(
+        "--llm-backend",
+        choices=["gemini", "openai"],
+        default=AppConfig.llm_backend,
+        help="Select LLM backend: gemini (default) or openai-compatible LLMEngine.",
+    )
+    parser.add_argument(
+        "--disable-rag",
+        action="store_true",
+        help="Disable RAG retrieval; pipeline still runs the two LLM steps.",
+    )
+    parser.add_argument(
         "--llm-model",
         default=AppConfig.llm_model,
         help="LLM model id.",
@@ -33,6 +43,22 @@ def parse_args():
         "--llm-api-key",
         default=AppConfig.llm_api_key,
         help="API key for the LLM provider.",
+    )
+    parser.add_argument(
+        "--gemini-model",
+        default=AppConfig.gemini_model,
+        help="Gemini model id for the pipeline.",
+    )
+    parser.add_argument(
+        "--gemini-api-key",
+        default=AppConfig.gemini_api_key,
+        help="Gemini API key (or set GEMINI_API_KEY).",
+    )
+    parser.add_argument(
+        "--pipeline-top-k",
+        type=int,
+        default=AppConfig.pipeline_top_k,
+        help="Override top-k for RAG retrieval (defaults to RAG config).",
     )
     parser.add_argument(
         "--disable-tts",
@@ -81,11 +107,34 @@ def parse_args():
 
 def build_service(args) -> SpeechToTextService:
     llm_engine = None
+    pipeline_engine = None
+
     if AppConfig.llm_enabled and not args.disable_llm:
-        llm_engine = LLMEngine(
-            model=args.llm_model,
-            base_url=args.llm_base_url,
-            api_key=args.llm_api_key,
+        from pipeline import LLMRAGPipeline, OpenAICompatClient
+        from rag import RAGService
+
+        if args.llm_backend == "gemini":
+            from llm.gemini_flash import GeminiFlashClient
+
+            llm_client = GeminiFlashClient(api_key=args.gemini_api_key, model=args.gemini_model)
+        else:
+            from llm.llm_engine import LLMEngine
+
+            llm_engine = LLMEngine(
+                model=args.llm_model,
+                base_url=args.llm_base_url,
+                api_key=args.llm_api_key,
+            )
+            llm_client = OpenAICompatClient(llm_engine)
+
+        rag_service = None
+        if AppConfig.rag_enabled and not args.disable_rag:
+            rag_service = RAGService()
+
+        pipeline_engine = LLMRAGPipeline(
+            llm_client=llm_client,
+            rag_service=rag_service,
+            top_k=args.pipeline_top_k,
         )
 
     tts_engine = None
@@ -102,6 +151,7 @@ def build_service(args) -> SpeechToTextService:
         model_id=args.model,
         language=args.language,
         llm_engine=llm_engine,
+        pipeline_engine=pipeline_engine,
         tts_engine=tts_engine,
         tts_output_dir=args.tts_output_dir,
     )
@@ -114,7 +164,7 @@ def main():
 
     service = build_service(args)
     app = create_app(service)
-    print("Server starting. Focus this terminal and press M to start/stop recording.")
+    print("Server starting. Focus this terminal and press M to start/stop recording, or POST /pipeline/text for typed input.")
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)
 
 
