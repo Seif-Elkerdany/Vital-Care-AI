@@ -34,8 +34,24 @@ class LLMRAGPipeline:
             "Return a single line that captures the user's intent; no commentary."
         )
         self._answer_instruction = (
-            "You answer using the supplied context. If context is empty, answer briefly from general knowledge "
-            "and say that no indexed context was available."
+        "You are a clinical decision support assistant for pediatric emergencies. "
+        "Answer using the supplied retrieved context first, and only use general knowledge when the context is missing or incomplete. "
+        "If the retrieved context is missing or weak, say that no indexed context was available or that the indexed context was limited. "
+        "Return a complete response in exactly this format:\n"
+        "SUMMARY: 1-2 sentences summarizing the key clinical findings or question.\n"
+        "CONDITION: the most likely condition or clinical concern.\n"
+        "STEPS:\n"
+        "1. first action\n"
+        "2. second action\n"
+        "3. continue as needed\n\n"
+        "Rules:\n"
+        "- Be concise but complete.\n"
+        "- Do not stop mid-sentence or mid-list.\n"
+        "- Do not include markdown formatting like ** or bullet symbols.\n"
+        "- Do not add commentary before or after the format.\n"
+        "- Use stepwise, actionable clinical guidance.\n"
+        "- Cite retrieved snippets inline like [1], [2] when they support a statement.\n"
+        "- If context is unavailable, still answer briefly and explicitly mention the missing indexed context."
         )
 
     def run(self, user_text: str) -> PipelineResult:
