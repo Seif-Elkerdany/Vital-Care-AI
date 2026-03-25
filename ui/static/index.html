@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MedAPP Pipeline Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">MedAPP Demo</p>
+        <h1>One clean screen for the full pipeline.</h1>
+        <p class="hero-text">
+          Speak or type to the full STT to RAG to TTS pipeline, inspect retrievals, ingest PDFs into RAG, and remove indexed documents when you need a fresh demo state.
+        </p>
+      </div>
+      <div class="hero-stat">
+        <span class="hero-stat-label">Status</span>
+        <strong id="healthStatus">Checking...</strong>
+        <span class="hero-stat-sub">FastAPI + existing pipeline services</span>
+      </div>
+    </header>
+
+    <main class="dashboard">
+      <section class="panel panel-query">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Pipeline</p>
+            <h2>Ask a medical question</h2>
+          </div>
+        </div>
+        <form id="queryForm" class="stack">
+          <div class="voice-bar">
+            <button id="recordBtn" class="button button-primary" type="button">Start Talking</button>
+            <div id="recordStatus" class="voice-status">Microphone idle</div>
+          </div>
+          <label class="field">
+            <span>Question</span>
+            <textarea id="queryInput" rows="5" placeholder="Example: summarize the signs of septic shock and the first management steps."></textarea>
+          </label>
+          <div class="form-row">
+            <button class="button button-primary" type="submit">Run Pipeline</button>
+          </div>
+        </form>
+        <div id="queryError" class="message message-error hidden"></div>
+        <div id="queryResult" class="result hidden">
+          <div class="result-block">
+            <span class="result-label">Transcript</span>
+            <p id="transcriptText"></p>
+          </div>
+          <div class="result-block">
+            <span class="result-label">Structured Query</span>
+            <p id="structuredQuery"></p>
+          </div>
+          <div class="result-block">
+            <span class="result-label">Final Answer</span>
+            <div id="finalAnswer" class="answer"></div>
+          </div>
+          <div class="result-block">
+            <span class="result-label">Spoken Response</span>
+            <audio id="ttsPlayer" controls class="tts-player hidden"></audio>
+            <p id="ttsStatus" class="doc-meta">No generated audio yet.</p>
+          </div>
+          <div class="result-block">
+            <span class="result-label">Retrieved Context</span>
+            <div id="retrievals" class="retrieval-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel panel-docs">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">RAG</p>
+            <h2>Manage indexed PDFs</h2>
+          </div>
+          <button id="refreshDocsBtn" class="button button-ghost" type="button">Refresh</button>
+        </div>
+
+        <form id="uploadForm" class="upload-form">
+          <label class="upload-dropzone">
+            <input id="fileInput" type="file" accept=".pdf" multiple />
+            <span class="upload-title">Drop PDFs here or click to browse</span>
+            <span class="upload-subtitle">The current backend indexes PDF documents only.</span>
+          </label>
+          <div id="selectedFiles" class="selected-files hidden"></div>
+          <button class="button button-primary" type="submit">Ingest Selected PDFs</button>
+        </form>
+
+        <div id="uploadResult" class="message hidden"></div>
+        <div id="documentsEmpty" class="empty-state hidden">No indexed documents yet.</div>
+        <div id="documentsList" class="documents-grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/assets/app.js"></script>
+</body>
+</html>
