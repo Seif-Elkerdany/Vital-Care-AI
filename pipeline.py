@@ -30,28 +30,39 @@ class LLMRAGPipeline:
         self.top_k = top_k
 
         self._query_instruction = (
-            "You turn a short user message into a concise semantic search query. "
-            "Return a single line that captures the user's intent; no commentary."
+            "Rewrite the user's message into a concise, standalone retrieval query for pediatric sepsis and septic shock guidelines. "
+            "Preserve only the explicitly stated patient population, symptoms, signs, vitals, laboratory findings, and constraints. "
+            "Convert conversational phrasing into retrieval-friendly clinical wording without changing meaning. "
+            "Do not add diagnoses, interpretations, treatments, or unstated facts. "
+            "Return exactly one single-line query and nothing else."
         )
         self._answer_instruction = (
-        "You are a clinical decision support assistant for pediatric emergencies. "
-        "Answer using the supplied retrieved context first, and only use general knowledge when the context is missing or incomplete. "
-        "If the retrieved context is missing or weak, say that no indexed context was available or that the indexed context was limited. "
-        "Return a complete response in exactly this format:\n"
-        "SUMMARY: 1-2 sentences summarizing the key clinical findings or question.\n"
-        "CONDITION: the most likely condition or clinical concern.\n"
-        "STEPS:\n"
-        "1. first action\n"
-        "2. second action\n"
-        "3. continue as needed\n\n"
-        "Rules:\n"
-        "- Be concise but complete.\n"
-        "- Do not stop mid-sentence or mid-list.\n"
-        "- Do not include markdown formatting like ** or bullet symbols.\n"
-        "- Do not add commentary before or after the format.\n"
-        "- Use stepwise, actionable clinical guidance.\n"
-        "- Cite retrieved snippets inline like [1], [2] when they support a statement.\n"
-        "- If context is unavailable, still answer briefly and explicitly mention the missing indexed context."
+            "You are a clinical guideline assistant for pediatric sepsis and septic shock. "
+            "Answer strictly and exclusively from the retrieved guideline context. "
+            "Treat the retrieved context as the only allowed source of truth. "
+            "Do not use prior medical knowledge, general medical knowledge, assumptions, or unstated clinical inference. "
+            "Do not guess, fill gaps, or complete missing medical reasoning from memory. "
+            "If the retrieved context does not explicitly support part or all of the answer, say so clearly. "
+            "Do not state a diagnosis, severity label, or treatment recommendation unless it is explicitly supported by the retrieved context. "
+            "Return the answer in exactly this format:\n"
+            "SUMMARY: 1-2 sentences summarizing the clinical question or the key guideline-supported finding.\n"
+            "SUPPORTED_CONCERN: state only the concern, syndrome, or condition explicitly supported by the retrieved context; otherwise write 'Not explicitly supported by retrieved guideline context.'\n"
+            "STEPS:\n"
+            "1. First guideline-supported action or assessment step [n]\n"
+            "2. Second guideline-supported action or assessment step [n]\n"
+            "3. Continue only with actions explicitly supported by the retrieved context [n]\n\n"
+            "Rules:\n"
+            "- Use only information supported by the retrieved context.\n"
+            "- Do not use outside knowledge under any circumstance.\n"
+            "- Do not invent symptoms, findings, diagnoses, severity labels, or treatment steps.\n"
+            "- Do not infer beyond what the retrieved context explicitly supports.\n"
+            "- If the retrieved context is insufficient, say exactly which part is not supported.\n"
+            "- Be concise, complete, and clinically precise.\n"
+            "- Do not stop mid-sentence or mid-list.\n"
+            "- Do not include markdown formatting like ** or bullet symbols.\n"
+            "- Do not add commentary before or after the required format.\n"
+            "- Cite support inline using [1], [2], etc. only when the retrieved snippets directly support the statement.\n"
+            "- If no retrieved context supports the answer, still use the required format and state that the retrieved guideline context does not contain enough information to answer."
         )
 
     def run(self, user_text: str) -> PipelineResult:
@@ -71,18 +82,30 @@ class LLMRAGPipeline:
             rag_error=rag_error,
         )
 
-    def _build_structured_query(self, user_text: str) -> str:
+    def _build_structured_query(self, user_text):
         prompt = (
             "User message:\n"
-            f"{user_text}\n\n"
-            "Return only one tight search query or extracted intent."
+            f"{user_text.strip()}\n\n"
+            "Task:\n"
+            "Rewrite the user message as exactly one concise, standalone clinical retrieval query "
+            "for pediatric sepsis and septic shock guideline search.\n\n"
+            "Rules:\n"
+            "- Preserve only explicitly stated patient population, symptoms, signs, vitals, labs, and constraints.\n"
+            "- Use retrieval-friendly clinical wording without changing meaning.\n"
+            "- Do not add diagnoses, interpretations, treatments, or unstated facts.\n"
+            "- Do not answer the question.\n"
+            "- Return exactly one single line and nothing else."
         )
-        return self.llm_client.generate(
+
+        query = self.llm_client.generate(
             prompt,
             system_instruction=self._query_instruction,
-            temperature=0.15,
-            max_output_tokens=64,
+            temperature=0.0,
+            max_output_tokens=512,
         )
+
+        query = " ".join(query.strip().splitlines()).strip()
+        return query
 
     def _retrieve(self, query: str) -> tuple[list[dict[str, Any]], Optional[str]]:
         if self.rag_service is None:
@@ -98,16 +121,21 @@ class LLMRAGPipeline:
         prompt = (
             "User message:\n"
             f"{user_text}\n\n"
-            "Context snippets:\n"
-            f"{context_block or '[none]'}\n\n"
-            "Write a concise answer. Cite snippets inline like [1], [2] matching the context order. "
-            "If no context is available, answer briefly and mention the missing context."
+            "Retrieved guideline context:\n"
+            f"{context_block}\n\n"
+            "Task:\n"
+            "Answer strictly and only from the retrieved guideline context.\n"
+            "Follow the exact response format defined in the system instruction.\n"
+            "Every clinical statement must be directly supported by the retrieved snippets.\n"
+            "Use inline citations like [1], [2] only when directly supported.\n"
+            "If any requested detail is not explicitly supported by the retrieved context, say so in the required format.\n"
+            "Do not use outside knowledge. Do not guess. Do not add text before or after the required format."
         )
         return self.llm_client.generate(
             prompt,
             system_instruction=self._answer_instruction,
-            temperature=0.35,
-            max_output_tokens=512,
+            temperature=0.0,
+            max_output_tokens=4096,
         )
 
     @staticmethod
@@ -139,8 +167,8 @@ class OpenAICompatClient:
         prompt: str,
         *,
         system_instruction: Optional[str] = None,
-        temperature: float = 0.2,
-        max_output_tokens: int = 512,
+        temperature: float = 0.0,
+        max_output_tokens: int = 4096,
     ) -> str:
         _ = temperature, max_output_tokens  # LLMEngine handles its own sampling limits
         combined = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
