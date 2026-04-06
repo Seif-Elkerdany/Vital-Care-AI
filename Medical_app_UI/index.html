@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ece8e3" />
+    <title>Vital Care AI</title>
+    <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" 
+    integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" 
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="phone-frame">
+        <div class="phone-notch"></div>
+
+        <section class="screen screen--active" id="screen-home">
+          <header class="screen-header screen-header--home">
+            <div class="screen-header__spacer"></div>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">Vital Care AI</h1>
+              <p class="screen-subtitle">Select an Emergency</p>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" id="open-menu-button" aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <div class="button-stack">
+            <button class="menu-card" type="button" data-protocol="Sepsis">Sepsis</button>
+            <button class="menu-card" type="button" data-protocol="Septic Shock">Septic Shock</button>
+            <button class="menu-card" type="button" data-protocol="Cardiac Arrest">Cardiac Arrest</button>
+            <button class="menu-card" type="button" data-screen-target="voice">Voice Chatbot</button>
+            <button class="menu-card" type="button" data-screen-target="guidelines">Full Guidelines</button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-vitals">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">VITALS</h1>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" data-open-menu aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <p class="section-label">Tap to start voice Input</p>
+          <button class="voice-pad" type="button" id="vitals-voice-button" aria-label="Start microphone">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
+
+          <div class="field-block">
+            <label class="field-label" for="transcript-preview">Transcript</label>
+            <textarea class="text-box text-box--large" id="transcript-preview" placeholder="Voice input will appear here..."></textarea>
+          </div>
+
+          <div class="hint-card">
+            <p>Give the following information:</p>
+            <ul>
+              <li>Heart Rate</li>
+              <li>Respiration Rate</li>
+              <li>Temperature</li>
+              <li>Oxygen Saturation</li>
+              <li>Blood Pressure</li>
+              <li>Additional Info</li>
+            </ul>
+          </div>
+
+          <div class="footer-action">
+            <button class="action-button" type="button" id="confirm-vitals-button">Confirm</button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-patient">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">PATIENT INFO</h1>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" data-open-menu aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <section class="card-panel">
+            <div class="summary-row">
+              <div>
+                <span class="mini-label">Age</span>
+                <strong id="patient-age">9</strong>
+              </div>
+              <div>
+                <span class="mini-label">Weight</span>
+                <strong id="patient-weight">60 lbs</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="card-panel">
+            <h2 class="card-title">Vitals</h2>
+            <div class="vitals-grid">
+              <div class="vital-cell"><span class="mini-label">BP</span><strong id="patient-bp">120/80 mmHg</strong></div>
+              <div class="vital-cell"><span class="mini-label">HR</span><strong id="patient-hr">75 bpm</strong></div>
+              <div class="vital-cell"><span class="mini-label">Temp</span><strong id="patient-temp">98.6 F</strong></div>
+              <div class="vital-cell"><span class="mini-label">RR</span><strong id="patient-rr">16 breaths/min</strong></div>
+              <div class="vital-cell vital-cell--wide"><span class="mini-label">SpO2</span><strong id="patient-spo2">99%</strong></div>
+            </div>
+          </section>
+
+          <section class="card-panel">
+            <div class="summary-row summary-row--stack">
+              <span class="mini-label">Additional Info</span>
+              <textarea class="text-box" id="additional-info">Lactate 4.2
+Cultures drawn</textarea>
+            </div>
+          </section>
+
+          <div class="footer-action">
+            <button class="action-button" type="button" id="start-assessment-button">Start Assessment</button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-steps">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">NEXT STEPS</h1>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" data-open-menu aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <section class="steps-header">
+            <h2 class="steps-protocol" id="steps-protocol-title">Probable Sepsis</h2>
+            <p class="steps-timing" id="steps-protocol-timing">Immediate - within 3 hours</p>
+          </section>
+
+          <div class="steps-list" id="steps-list"></div>
+        </section>
+
+        <section class="screen" id="screen-voice">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">VOICE CHATBOT</h1>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" data-open-menu aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <div class="chat-feed" id="chat-feed">
+            <article class="chat-bubble chat-bubble--user">
+              <p class="chat-bubble__text" id="voice-summary">
+                6y, 20kg fever, tachycardia, BP 88/52, lactate 4.2, cultures drawn, ceftriaxone running.
+              </p>
+            </article>
+            <article class="chat-bubble">
+              <p class="chat-bubble__text" id="assistant-response">
+                Summary and next steps will appear here after transcription or chatbot response.
+              </p>
+            </article>
+          </div>
+
+          <button class="voice-pad voice-pad--compact" type="button" id="voice-screen-button" aria-label="Start microphone">
+            <i class="fa-solid fa-microphone"></i>
+          </button>
+          <input class="text-input" id="voice-text-input" type="text" placeholder="Start typing here..." />
+        </section>
+
+        <section class="screen" id="screen-guidelines">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">GUIDELINES</h1>
+            </div>
+            <button class="icon-button icon-button--menu" type="button" data-open-menu aria-label="Open menu">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </header>
+
+          <p class="section-copy">Full guide for initial resuscitation in children with probable sepsis without shock or suspected septic shock.</p>
+
+          <figure class="image-card">
+            <img class="guideline-image" id="guideline-image" src="./images/procedure.jpeg" alt="Sepsis procedure guideline" />
+            <figcaption class="image-fallback" id="guideline-fallback">
+              Add `procedure.jpeg` to the `Medical_app_UI/images` folder to show the full guideline image here.
+            </figcaption>
+          </figure>
+        </section>
+
+        <section class="screen" id="screen-menu">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">MENU</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <div class="menu-list">
+            <button class="menu-list-item" type="button" data-screen-target="settings">
+              <i class="fa-solid fa-gear"></i>
+              <span>Settings</span>
+            </button>
+            <button class="menu-list-item" type="button" data-screen-target="calculator">
+              <i class="fa-solid fa-calculator"></i>
+              <span>Calculator</span>
+            </button>
+            <button class="menu-list-item" type="button" data-screen-target="notes">
+              <i class="fa-regular fa-clipboard"></i>
+              <span>Notes</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-settings">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">SETTINGS</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <div class="settings-list">
+            <label class="toggle-row">
+              <span><i class="fa-solid fa-moon"></i> Dark Mode</span>
+              <input id="dark-mode-toggle" type="checkbox" />
+            </label>
+            <label class="slider-row">
+              <span><i class="fa-solid fa-font"></i> Adjust Text Size</span>
+              <input id="text-size-slider" type="range" min="14" max="22" value="16" />
+            </label>
+            <label class="slider-row">
+              <span><i class="fa-solid fa-microphone"></i> Microphone Threshold</span>
+              <input id="mic-threshold-slider" type="range" min="0" max="100" value="35" />
+            </label>
+            <label class="slider-row">
+              <span><i class="fa-solid fa-volume-high"></i> Volume</span>
+              <input id="volume-slider" type="range" min="0" max="100" value="70" />
+            </label>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-calculator">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">CALCULATOR</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <section class="card-panel">
+            <label class="field-label" for="weight-input">Patient Weight (kg)</label>
+            <input class="text-input" id="weight-input" type="number" min="0" step="0.1" value="20" />
+          </section>
+
+          <section class="card-panel">
+            <label class="field-label" for="bolus-input">Fluid Bolus (mL/kg)</label>
+            <input class="text-input" id="bolus-input" type="number" min="0" step="1" value="20" />
+          </section>
+
+          <div class="footer-action footer-action--stack">
+            <button class="action-button" type="button" id="calculate-button">
+              <i class="fa-solid fa-calculator"></i>
+              <span>Calculate</span>
+            </button>
+            <div class="result-card" id="calculator-result">Recommended bolus: 400 mL</div>
+          </div>
+
+          <section class="card-panel">
+            <label class="field-label" for="calculator-display">Calculator</label>
+            <input class="text-input calculator-display" id="calculator-display" type="text" value="0" readonly />
+
+            <div class="calculator-grid">
+              <button class="calculator-key calculator-key--wide" type="button" data-calc-action="clear">C</button>
+              <button class="calculator-key" type="button" data-calc-value="/">/</button>
+              <button class="calculator-key" type="button" data-calc-value="*">*</button>
+              <button class="calculator-key" type="button" data-calc-value="7">7</button>
+              <button class="calculator-key" type="button" data-calc-value="8">8</button>
+              <button class="calculator-key" type="button" data-calc-value="9">9</button>
+              <button class="calculator-key" type="button" data-calc-value="-">-</button>
+              <button class="calculator-key" type="button" data-calc-value="4">4</button>
+              <button class="calculator-key" type="button" data-calc-value="5">5</button>
+              <button class="calculator-key" type="button" data-calc-value="6">6</button>
+              <button class="calculator-key" type="button" data-calc-value="+">+</button>
+              <button class="calculator-key" type="button" data-calc-value="1">1</button>
+              <button class="calculator-key" type="button" data-calc-value="2">2</button>
+              <button class="calculator-key" type="button" data-calc-value="3">3</button>
+              <button class="calculator-key calculator-key--tall" type="button" data-calc-action="equals">=</button>
+              <button class="calculator-key calculator-key--wide" type="button" data-calc-value="0">0</button>
+              <button class="calculator-key" type="button" data-calc-value=".">.</button>
+            </div>
+          </section>
+
+        </section>
+
+        <section class="screen" id="screen-notes">
+          <header class="screen-header">
+            <button class="icon-button" type="button" data-back-button aria-label="Go back">←</button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">NOTES</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <section class="card-panel">
+            <label class="field-label" for="notes-box">Clinical Notes</label>
+            <textarea class="text-box text-box--notes" id="notes-box">Patient reassessed. Perfusion improving after initial bolus. Repeat lactate pending.</textarea>
+          </section>
+        </section>
+
+        <div class="app-copyright">Copyright 2026 Vital Care AI</div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
