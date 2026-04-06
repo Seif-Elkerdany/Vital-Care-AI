@@ -1,5 +1,0 @@
--r ../stt/requirements.txt
--r ../rag/requirements.txt
--r ../tts/requirements.txt
-python-multipart
-uvicorn[standard]

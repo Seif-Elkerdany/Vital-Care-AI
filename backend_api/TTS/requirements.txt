@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+numpy
+kokoro>=0.9.4
+soundfile

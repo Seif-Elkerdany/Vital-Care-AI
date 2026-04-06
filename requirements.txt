@@ -1,4 +1,4 @@
--r stt/requirements.txt
--r rag/requirements.txt
--r tts/requirements.txt
-google-genai
+-r backend_api/LLM/requirements.txt
+-r backend_api/RAG/requirements.txt
+-r backend_api/STT/requirements.txt
+-r backend_api/TTS/requirements.txt
