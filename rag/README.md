@@ -456,6 +456,8 @@ python -m rag.test list
 
 The first run of `sentence-transformers/all-MiniLM-L6-v2` may download model files. If that fails, check your Python environment and internet access.
 
+If you override `RAG_EMBEDDING_MODEL` with a newer checkpoint and see an error like `Transformers does not recognize this architecture`, your installed `transformers` version is too old for that model family. Switch back to `sentence-transformers/all-MiniLM-L6-v2` or upgrade `transformers` and `sentence-transformers` together.
+
 ## Suggested Next Improvement
 
 If you want this module to become a complete RAG QA system, the next feature should be an `answer_question()` method in `service.py` that:
