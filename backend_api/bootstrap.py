@@ -162,9 +162,18 @@ def build_service(args) -> SpeechToTextService:
 
 
 def create_app(service: SpeechToTextService):
+    from fastapi.middleware.cors import CORSMiddleware
+
     from backend_api.STT.api import create_app as create_stt_app
 
-    return create_stt_app(service)
+    app = create_stt_app(service)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    return app
 
 
 def main() -> None:

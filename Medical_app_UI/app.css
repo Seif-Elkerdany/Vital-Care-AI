@@ -263,6 +263,12 @@ figure {
   margin-top: 18px;
 }
 
+.voice-pad--recording {
+  background: #e53e3e;
+  border-color: #c53030;
+  color: #ffffff;
+}
+
 .field-block {
   margin-top: 24px;
 }

@@ -1,9 +1,9 @@
 (function () {
   const API = {
-    status: "/recording/status",
-    toggle: "/recording/toggle",
-    latestTranscription: "/transcriptions/latest",
-    latestAudio: "/responses/latest/audio/mp3"
+    status: "http://localhost:8000/recording/status",
+    toggle: "http://localhost:8000/recording/toggle",
+    latestTranscription: "http://localhost:8000/transcriptions/latest",
+    latestAudio: "http://localhost:8000/responses/latest/audio/mp3"
   };
 
   const protocols = {
@@ -100,14 +100,14 @@
     activeAudio: null,
     lastHandledAt: null,
     patient: {
-      age: "9",
-      weight: "60 lbs",
-      bloodPressure: "120/80 mmHg",
-      heartRate: "75 bpm",
-      temperature: "98.6 F",
-      respiratoryRate: "16 breaths/min",
-      oxygen: "99%",
-      additionalInfo: "Lactate 4.2\nCultures drawn"
+      age: "N/A",
+      weight: "N/A",
+      bloodPressure: "N/A",
+      heartRate: "N/A",
+      temperature: "N/A",
+      respiratoryRate: "N/A",
+      oxygen: "N/A",
+      additionalInfo: "N/A"
     }
   };
 
@@ -138,9 +138,10 @@
 
   function setMicButtonIcon(button, listening) {
     button.innerHTML = listening
-      ? '<i class="fa-solid fa-microphone-slash"></i>'
-      : '<i class="fa-solid fa-microphone"></i>';
+      ? '<i class="fa-solid fa-microphone"></i>'
+      : '<i class="fa-solid fa-microphone-slash"></i>';
     button.setAttribute("aria-label", listening ? "Stop microphone" : "Start microphone");
+    button.classList.toggle("voice-pad--recording", listening);
   }
 
   function showScreen(name) {
@@ -228,24 +229,38 @@
 
   function parseTranscript(text) {
     const normalized = text.toLowerCase();
+
+    // Reset all fields to N/A before filling in what was found
+    state.patient.age = "N/A";
+    state.patient.weight = "N/A";
+    state.patient.heartRate = "N/A";
+    state.patient.bloodPressure = "N/A";
+    state.patient.temperature = "N/A";
+    state.patient.respiratoryRate = "N/A";
+    state.patient.oxygen = "N/A";
+    state.patient.additionalInfo = "N/A";
+
+    const NUM = "(?:is|of|at|:)?\\s*(\\d+(?:\\.\\d+)?)";
     const ageMatch = normalized.match(/(\d+)\s*(?:years old|year old|years|year|yrs|yr)/);
-    const weightMatch = normalized.match(/(\d+)\s*(?:lbs|pounds|kg)/);
-    const hrMatch = normalized.match(/heart rate\s+(?:is\s+)?(\d+)/) || normalized.match(/(\d+)\s*bpm/);
-    const bpMatch = normalized.match(/blood pressure\s+(?:is\s+)?(\d+)\s*(?:\/|over)\s*(\d+)/) || normalized.match(/(\d+)\s*(?:\/|over)\s*(\d+)/);
-    const tempMatch = normalized.match(/temperature\s+(?:is\s+)?(\d+(?:\.\d+)?)/);
-    const rrMatch = normalized.match(/(?:respiration rate|respiratory rate|rr)\s+(?:is\s+)?(\d+)/);
-    const spo2Match = normalized.match(/(?:spo2|oxygen|oxygen saturation)\s+(?:is\s+)?(\d+)/);
+    const weightMatch = normalized.match(/(?:weight|weighs?)\s+(?:is\s+|of\s+)?(\d+)\s*(?:lbs|pounds|kg)/) ||
+                        normalized.match(/(\d+)\s*(?:lbs|pounds|kg)/);
+    const hrMatch = normalized.match(new RegExp("(?:heart rate|heart-rate|hr)\\s+" + NUM)) ||
+                    normalized.match(/(\d+)\s*bpm/);
+    const bpMatch = normalized.match(/(?:blood pressure|bp)\s+(?:is\s+|of\s+|at\s+)?(\d+)\s*(?:\/|over)\s*(\d+)/) ||
+                    normalized.match(/(\d+)\s*(?:\/|over)\s*(\d+)\s*(?:mmhg)?/);
+    const tempMatch = normalized.match(new RegExp("(?:temperature|temp)\\s+" + NUM));
+    const rrMatch = normalized.match(new RegExp("(?:respiration rate|respiratory rate|rr)\\s+" + NUM));
+    const spo2Match = normalized.match(new RegExp("(?:spo2|sp o2|oxygen saturation|oxygen)\\s+" + NUM));
 
     if (ageMatch) state.patient.age = ageMatch[1];
     if (weightMatch) state.patient.weight = weightMatch[1] + (normalized.includes("kg") ? " kg" : " lbs");
-    if (hrMatch) state.patient.heartRate = hrMatch[1] + " bpm";
+    if (hrMatch) state.patient.heartRate = (hrMatch[1] || hrMatch[2] || hrMatch[0].match(/\d+/)[0]) + " bpm";
     if (bpMatch) state.patient.bloodPressure = bpMatch[1] + "/" + bpMatch[2] + " mmHg";
     if (tempMatch) state.patient.temperature = tempMatch[1] + " F";
     if (rrMatch) state.patient.respiratoryRate = rrMatch[1] + " breaths/min";
     if (spo2Match) state.patient.oxygen = spo2Match[1] + "%";
 
     if (normalized.trim()) {
-      state.patient.additionalInfo = text.trim();
       voiceSummary.textContent = text.trim();
     }
   }
@@ -296,6 +311,8 @@
 
       if (latest.llm_response) {
         assistantResponse.textContent = latest.llm_response;
+        state.patient.additionalInfo = latest.llm_response;
+        renderPatientInfo();
         if (state.speakerEnabled) {
           if (state.activeAudio) {
             state.activeAudio.pause();
