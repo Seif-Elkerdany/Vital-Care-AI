@@ -332,6 +332,17 @@ figure {
   color: #ffffff;
 }
 
+.voice-pad--working {
+  background: var(--accent);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.voice-pad:disabled {
+  cursor: wait;
+  opacity: 0.92;
+}
+
 .field-block {
   margin-top: 24px;
 }
@@ -347,7 +358,7 @@ figure {
   width: 100%;
   padding: 12px;
   border: 2px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--ink);
 }
@@ -410,6 +421,29 @@ figure {
 
 .summary-row--stack {
   display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#additional-info {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  min-height: 120px;
+  display: block;
+  box-sizing: border-box;
+}
+
+#screen-patient .summary-row--stack {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#screen-patient #additional-info {
+  width: 100% !important;
+  min-width: 100%;
+  max-width: none;
+  justify-self: stretch;
 }
 
 .card-title {
@@ -643,6 +677,12 @@ body.lightbox-open {
   font-size: 18px;
 }
 
+.select-row {
+  display: grid;
+  gap: 8px;
+  font-size: 18px;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;
@@ -668,7 +708,18 @@ body.lightbox-open {
   gap: 10px;
 }
 
+.select-row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .slider-row span i {
+  width: 20px;
+  text-align: center;
+}
+
+.select-row span i {
   width: 20px;
   text-align: center;
 }
