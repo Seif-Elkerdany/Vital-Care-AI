@@ -100,6 +100,7 @@
     speakerEnabled: true,
     activeAudio: null,
     lastHandledAt: null,
+    recordingTarget: null,
     patient: {
       age: "N/A",
       weight: "N/A",
@@ -381,24 +382,44 @@
       }
 
       state.lastHandledAt = latest.created_at;
-      transcriptPreview.value = latest.text;
-      parseTranscript(latest.text);
-      renderPatientInfo();
+      const target = state.recordingTarget || (state.currentScreen === "voice" ? "voice" : "vitals");
 
-      if (latest.llm_response) {
-        assistantResponse.textContent = latest.llm_response;
-        state.patient.additionalInfo = latest.llm_response;
-        renderPatientInfo();
-        if (state.speakerEnabled) {
-          if (state.activeAudio) {
-            state.activeAudio.pause();
+      if (target == "voice") {
+        voiceSummary.textContent = latest.text || "";
+        if (latest.llm_response) {
+          assistantResponse.textContent = latest.llm_response;
+          if (state.speakerEnabled) {
+            if (state.activeAudio) {  
+              state.activeAudio.pause();
+            }
+            state.activeAudio = new Audio(API.latestAudio + "?t=" + Date.now());
+            state.activeAudio.play().catch(function () {});
           }
-          state.activeAudio = new Audio(API.latestAudio + "?t=" + Date.now());
-          state.activeAudio.play().catch(function () {});
+        } else {
+          assistantResponse.textContent = "Voice input captured. Use the mic again to continue.";
         }
       } else {
-        assistantResponse.textContent = "Patient update captured for the selected protocol.";
+        transcriptPreview.value = latest.text;
+        parseTranscript(latest.text);
+        renderPatientInfo();
+
+        if (latest.llm_response) {
+          assistantResponse.textContent = latest.llm_response;
+          state.patient.additionalInfo = latest.llm_response;
+          renderPatientInfo();
+          if (state.speakerEnabled) {
+            if (state.activeAudio) {
+              state.activeAudio.pause();
+            }
+            state.activeAudio = new Audio(API.latestAudio + "?t=" + Date.now());
+            state.activeAudio.play().catch(function () {});
+          }
+        } else {
+          assistantResponse.textContent = "Patient update captured for the selected protocol.";
+        }
       }
+
+      state.recordingTarget = null;
     } catch (error) {
       if (!/No transcription has been published yet/i.test(error.message)) {
         assistantResponse.textContent = error.message;
@@ -455,8 +476,15 @@
     navigateTo("home");
   });
 
-  document.getElementById("vitals-voice-button").addEventListener("click", toggleRecording);
-  document.getElementById("voice-screen-button").addEventListener("click", toggleRecording);
+  document.getElementById("vitals-voice-button").addEventListener("click", function () {
+    state.recordingTarget = "vitals";
+    toggleRecording();
+  });
+
+  document.getElementById("voice-screen-button").addEventListener("click", function () {
+    state.recordingTarget = "voice";
+    toggleRecording();
+  });
 
   document.getElementById("voice-text-input").addEventListener("change", function (event) {
     if (event.target.value.trim()) {
