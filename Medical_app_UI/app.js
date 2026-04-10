@@ -96,6 +96,7 @@
     currentScreen: "home",
     screenHistory: [],
     selectedProtocol: "",
+    stepCompletion: [],
     speakerEnabled: true,
     activeAudio: null,
     lastHandledAt: null,
@@ -116,6 +117,8 @@
   const stepsList = document.getElementById("steps-list");
   const stepsProtocolTitle = document.getElementById("steps-protocol-title");
   const stepsProtocolTiming = document.getElementById("steps-protocol-timing");
+  const stepsProgress = document.getElementById("steps-progress");
+  const finishStepsButton = document.getElementById("finish-steps-button");
   const patientAge = document.getElementById("patient-age");
   const patientWeight = document.getElementById("patient-weight");
   const patientBp = document.getElementById("patient-bp");
@@ -127,6 +130,10 @@
   const assistantResponse = document.getElementById("assistant-response");
   const guidelineImage = document.getElementById("guideline-image");
   const guidelineFallback = document.getElementById("guideline-fallback");
+  const guidelineZoomTrigger = document.getElementById("guideline-zoom-trigger");
+  const guidelineLightbox = document.getElementById("guideline-lightbox");
+  const guidelineLightboxImage = document.getElementById("guideline-lightbox-image");
+  const guidelineLightboxClose = document.getElementById("guideline-lightbox-close");
   const calculateButton = document.getElementById("calculate-button");
   const calculatorResult = document.getElementById("calculator-result");
   const weightInput = document.getElementById("weight-input");
@@ -135,12 +142,23 @@
   const textSizeSlider = document.getElementById("text-size-slider");
   const darkModeToggle = document.getElementById("dark-mode-toggle");
   const speakerButtons = [document.getElementById("voice-screen-button"), document.getElementById("vitals-voice-button")];
+  const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
+    return !element.matches("i, .fa-solid, .fa-regular, .fa-brands");
+  });
+  const baseTextSizes = new Map();
+
+  scalableTextElements.forEach(function (element) {
+    const fontSize = parseFloat(window.getComputedStyle(element).fontSize);
+    if (Number.isFinite(fontSize)) {
+      baseTextSizes.set(element, fontSize);
+    }
+  });
 
   function setMicButtonIcon(button, listening) {
     button.innerHTML = listening
-      ? '<i class="fa-solid fa-microphone"></i>'
-      : '<i class="fa-solid fa-microphone-slash"></i>';
-    button.setAttribute("aria-label", listening ? "Stop microphone" : "Start microphone");
+      ? '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>'
+      : '<i class="fa-solid fa-circle"></i><span class="voice-pad__label">Record Voice</span>';
+    button.setAttribute("aria-label", listening ? "Stop recording" : "Start recording");
     button.classList.toggle("voice-pad--recording", listening);
   }
 
@@ -149,6 +167,9 @@
       screens[key].classList.toggle("screen--active", key === name);
     });
     state.currentScreen = name;
+    if (screens[name]) {
+      screens[name].scrollTop = 0;
+    }
   }
 
   function navigateTo(name) {
@@ -161,6 +182,26 @@
   function goBack() {
     const previous = state.screenHistory.pop();
     showScreen(previous || "home");
+  }
+
+  function openGuidelineZoom() {
+    if (guidelineImage.classList.contains("is-hidden")) {
+      return;
+    }
+    guidelineLightbox.classList.remove("is-hidden");
+    document.body.classList.add("lightbox-open");
+  }
+
+  function closeGuidelineZoom() {
+    guidelineLightbox.classList.add("is-hidden");
+    document.body.classList.remove("lightbox-open");
+  }
+
+  function applyTextScale(size) {
+    const scale = size / 16;
+    baseTextSizes.forEach(function (baseSize, element) {
+      element.style.fontSize = baseSize * scale + "px";
+    });
   }
 
   function renderPatientInfo() {
@@ -196,15 +237,45 @@
     }
   }
 
+  function updateStepsProgress() {
+    const total = state.stepCompletion.length;
+    const completed = state.stepCompletion.filter(Boolean).length;
+    stepsProgress.textContent = completed + " of " + total + " steps completed";
+    finishStepsButton.disabled = total === 0 || completed !== total;
+  }
+
+  function toggleStep(index) {
+    state.stepCompletion[index] = !state.stepCompletion[index];
+    const card = stepsList.querySelector('[data-step-index="' + index + '"]');
+    if (card) {
+      const complete = state.stepCompletion[index];
+      card.classList.toggle("step-card--complete", complete);
+      card.setAttribute("aria-pressed", complete ? "true" : "false");
+      const indicator = card.querySelector(".step-number");
+      if (indicator) {
+        indicator.innerHTML = complete
+          ? '<i class="fa-solid fa-check"></i>'
+          : String(index + 1);
+      }
+    }
+    updateStepsProgress();
+  }
+
   function renderSteps() {
     const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
     stepsProtocolTitle.textContent = protocol.title;
     stepsProtocolTiming.textContent = protocol.timing;
     stepsList.innerHTML = "";
+    state.stepCompletion = protocol.steps.map(function () {
+      return false;
+    });
 
     protocol.steps.forEach(function (step, index) {
-      const wrapper = document.createElement("article");
+      const wrapper = document.createElement("button");
       wrapper.className = "step-card";
+      wrapper.type = "button";
+      wrapper.dataset.stepIndex = String(index);
+      wrapper.setAttribute("aria-pressed", "false");
 
       const number = document.createElement("div");
       number.className = "step-number";
@@ -223,8 +294,13 @@
       body.appendChild(text);
       wrapper.appendChild(number);
       wrapper.appendChild(body);
+      wrapper.addEventListener("click", function () {
+        toggleStep(index);
+      });
       stepsList.appendChild(wrapper);
     });
+
+    updateStepsProgress();
   }
 
   function parseTranscript(text) {
@@ -333,6 +409,11 @@
   document.querySelectorAll("[data-protocol]").forEach(function (button) {
     button.addEventListener("click", function () {
       state.selectedProtocol = button.dataset.protocol;
+      if (state.selectedProtocol === "Cardiac Arrest") {
+        renderSteps();
+        navigateTo("steps");
+        return;
+      }
       navigateTo("vitals");
     });
   });
@@ -370,6 +451,10 @@
     navigateTo("steps");
   });
 
+  finishStepsButton.addEventListener("click", function () {
+    navigateTo("home");
+  });
+
   document.getElementById("vitals-voice-button").addEventListener("click", toggleRecording);
   document.getElementById("voice-screen-button").addEventListener("click", toggleRecording);
 
@@ -382,15 +467,31 @@
 
   guidelineImage.addEventListener("error", function () {
     guidelineImage.classList.add("is-hidden");
+    guidelineZoomTrigger.classList.add("is-hidden");
+    guidelineLightboxImage.classList.add("is-hidden");
     guidelineFallback.classList.remove("is-hidden");
     guidelineFallback.style.display = "block";
+  });
+
+  guidelineZoomTrigger.addEventListener("click", openGuidelineZoom);
+  guidelineLightboxClose.addEventListener("click", closeGuidelineZoom);
+  guidelineLightbox.addEventListener("click", function (event) {
+    if (event.target === guidelineLightbox) {
+      closeGuidelineZoom();
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !guidelineLightbox.classList.contains("is-hidden")) {
+      closeGuidelineZoom();
+    }
   });
 
   calculateButton.addEventListener("click", function () {
     const weight = Number(weightInput.value || 0);
     const bolus = Number(bolusInput.value || 0);
     const total = weight * bolus;
-    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL";
+    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL at " + bolus.toFixed(0) + " mL/kg";
   });
 
   document.querySelectorAll("[data-calc-value]").forEach(function (button) {
@@ -411,7 +512,7 @@
   });
 
   textSizeSlider.addEventListener("input", function (event) {
-    document.documentElement.style.fontSize = event.target.value + "px";
+    applyTextScale(Number(event.target.value));
   });
 
   darkModeToggle.addEventListener("change", function (event) {
@@ -430,6 +531,7 @@
 
   renderPatientInfo();
   renderSteps();
+  applyTextScale(Number(textSizeSlider.value));
   speakerButtons.forEach(function (button) {
     setMicButtonIcon(button, false);
   });
