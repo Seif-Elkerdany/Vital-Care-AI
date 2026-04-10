@@ -1,8 +1,11 @@
 (function () {
+  const STORAGE_KEY = "medapp-ui-state";
   const API = {
     status: "http://localhost:8000/recording/status",
     toggle: "http://localhost:8000/recording/toggle",
     latestTranscription: "http://localhost:8000/transcriptions/latest",
+    latestResponse: "http://localhost:8000/responses/latest",
+    pipelineText: "http://localhost:8000/pipeline/text",
     latestAudio: "http://localhost:8000/responses/latest/audio/mp3"
   };
 
@@ -129,9 +132,105 @@
     chatData: {
       summary: "",
       response: "Summary and next steps will appear here after transcription or chatbot response.",
-      input: ""
+      input: "",
+      statusMessage: "",
+      history: []
     }
   };
+
+  function createChatMessage(role, text) {
+    return {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      role: role,
+      text: text
+    };
+  }
+
+  function sanitizePatient(patient) {
+    return Object.assign(createBlankPatient(), patient || {});
+  }
+
+  function sanitizeProtocolData(protocolData) {
+    const fallback = {
+      "Sepsis": {
+        transcript: "",
+        statusMessage: "Press Record Voice to capture the patient's vitals.",
+        patient: createBlankPatient()
+      },
+      "Septic Shock": {
+        transcript: "",
+        statusMessage: "Press Record Voice to capture the patient's vitals.",
+        patient: createBlankPatient()
+      }
+    };
+
+    Object.keys(fallback).forEach(function (protocolName) {
+      const savedRecord = protocolData && protocolData[protocolName];
+      fallback[protocolName] = {
+        transcript: savedRecord && typeof savedRecord.transcript === "string" ? savedRecord.transcript : fallback[protocolName].transcript,
+        statusMessage: savedRecord && typeof savedRecord.statusMessage === "string" ? savedRecord.statusMessage : fallback[protocolName].statusMessage,
+        patient: sanitizePatient(savedRecord && savedRecord.patient)
+      };
+    });
+
+    return fallback;
+  }
+
+  function saveState() {
+    try {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        currentScreen: state.currentScreen,
+        screenHistory: state.screenHistory,
+        selectedProtocol: state.selectedProtocol,
+        lastHandledAt: state.lastHandledAt,
+        protocolData: state.protocolData,
+        chatData: state.chatData
+      }));
+    } catch (error) {
+      // Ignore storage failures so the app still works in private browsing or strict environments.
+    }
+  }
+
+  function restoreState() {
+    try {
+      const raw = window.sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+
+      const saved = JSON.parse(raw);
+      state.currentScreen = screens[saved.currentScreen] ? saved.currentScreen : "home";
+      state.screenHistory = Array.isArray(saved.screenHistory)
+        ? saved.screenHistory.filter(function (screenName) {
+            return !!screens[screenName];
+          })
+        : [];
+      state.selectedProtocol = typeof saved.selectedProtocol === "string" ? saved.selectedProtocol : "";
+      state.lastHandledAt = typeof saved.lastHandledAt === "string" ? saved.lastHandledAt : null;
+      state.protocolData = sanitizeProtocolData(saved.protocolData);
+      state.chatData = {
+        summary: saved.chatData && typeof saved.chatData.summary === "string" ? saved.chatData.summary : "",
+        response: saved.chatData && typeof saved.chatData.response === "string"
+          ? saved.chatData.response
+          : "Summary and next steps will appear here after transcription or chatbot response.",
+        input: saved.chatData && typeof saved.chatData.input === "string" ? saved.chatData.input : "",
+        statusMessage: saved.chatData && typeof saved.chatData.statusMessage === "string" ? saved.chatData.statusMessage : "",
+        history: saved.chatData && Array.isArray(saved.chatData.history)
+          ? saved.chatData.history.filter(function (item) {
+              return item && (item.role === "user" || item.role === "assistant") && typeof item.text === "string" && item.text.trim();
+            }).map(function (item) {
+              return {
+                id: typeof item.id === "string" ? item.id : createChatMessage(item.role, item.text).id,
+                role: item.role,
+                text: item.text
+              };
+            })
+          : []
+      };
+    } catch (error) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+    }
+  }
 
   const transcriptPreview = document.getElementById("transcript-preview");
   const additionalInfo = document.getElementById("additional-info");
@@ -147,8 +246,7 @@
   const patientTemp = document.getElementById("patient-temp");
   const patientRr = document.getElementById("patient-rr");
   const patientSpo2 = document.getElementById("patient-spo2");
-  const voiceSummary = document.getElementById("voice-summary");
-  const assistantResponse = document.getElementById("assistant-response");
+  const chatFeed = document.getElementById("chat-feed");
   const voiceStatusMessage = document.getElementById("voice-status-message");
   const guidelineImage = document.getElementById("guideline-image");
   const guidelineFallback = document.getElementById("guideline-fallback");
@@ -167,6 +265,9 @@
   const unitSystemSelect = document.getElementById("unit-system-select");
   const vitalsVoiceButton = document.getElementById("vitals-voice-button");
   const voiceScreenButton = document.getElementById("voice-screen-button");
+  const voiceSendButton = document.getElementById("voice-send-button");
+  const voiceClearButton = document.getElementById("voice-clear-button");
+  const voiceChatStatus = document.getElementById("voice-chat-status");
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
   const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
@@ -213,6 +314,7 @@
     if (screens[name]) {
       screens[name].scrollTop = 0;
     }
+    saveState();
   }
 
   function isProtocolTarget(target) {
@@ -223,6 +325,36 @@
     return state.protocolData[protocolName] || state.protocolData.Sepsis;
   }
 
+  function appendChatMessage(role, text) {
+    const cleaned = String(text || "").trim();
+    if (!cleaned) {
+      return;
+    }
+
+    const lastMessage = state.chatData.history[state.chatData.history.length - 1];
+    if (lastMessage && lastMessage.role === role && lastMessage.text === cleaned) {
+      return;
+    }
+
+    state.chatData.history.push(createChatMessage(role, cleaned));
+  }
+
+  function resetVoiceConversation() {
+    state.chatData.summary = "";
+    state.chatData.response = "Summary and next steps will appear here after transcription or chatbot response.";
+    state.chatData.input = "";
+    state.chatData.statusMessage = "";
+    state.chatData.history = [];
+    state.lastHandledAt = null;
+    state.pendingRecordingTarget = null;
+    if (state.activeAudio) {
+      state.activeAudio.pause();
+      state.activeAudio = null;
+    }
+    renderMicButtons("idle");
+    renderVoiceChat();
+  }
+
   function renderMicButtons(uiState) {
     const target = state.pendingRecordingTarget;
     setMicButtonState(vitalsVoiceButton, isProtocolTarget(target) ? uiState : "idle");
@@ -230,9 +362,50 @@
   }
 
   function renderVoiceChat() {
-    voiceSummary.textContent = state.chatData.summary || "Start typing or record a question to begin.";
-    assistantResponse.textContent = state.chatData.response;
+    chatFeed.innerHTML = "";
+
+    if (!state.chatData.history.length) {
+      appendChatMessage("assistant", state.chatData.response || "Summary and next steps will appear here after transcription or chatbot response.");
+    }
+
+    state.chatData.history.forEach(function (message) {
+      const bubble = document.createElement("article");
+      bubble.className = message.role === "user" ? "chat-bubble chat-bubble--user" : "chat-bubble";
+
+      const text = document.createElement("p");
+      text.className = "chat-bubble__text";
+      text.textContent = message.text;
+
+      bubble.appendChild(text);
+      chatFeed.appendChild(bubble);
+    });
+
     voiceTextInput.value = state.chatData.input;
+    voiceChatStatus.textContent = state.chatData.statusMessage || "";
+    voiceChatStatus.classList.toggle("is-visible", !!state.chatData.statusMessage);
+    chatFeed.scrollTop = chatFeed.scrollHeight;
+    saveState();
+  }
+
+  async function syncLatestVoiceResponse() {
+    try {
+      const latestResponse = await fetchJson(API.latestResponse);
+      if (!latestResponse.created_at || latestResponse.created_at !== state.lastHandledAt) {
+        return;
+      }
+
+      state.chatData.summary = latestResponse.transcript || state.chatData.summary;
+      state.chatData.input = "";
+      state.chatData.response = latestResponse.response || state.chatData.response;
+      state.chatData.statusMessage = "";
+      appendChatMessage("user", state.chatData.summary);
+      appendChatMessage("assistant", state.chatData.response);
+      renderVoiceChat();
+    } catch (error) {
+      if (!/LLM response is not available/i.test(error.message)) {
+        throw error;
+      }
+    }
   }
 
   function renderVitalsView() {
@@ -245,6 +418,7 @@
     const record = getProtocolRecord(state.selectedProtocol);
     transcriptPreview.value = record.transcript;
     voiceStatusMessage.textContent = record.statusMessage;
+    saveState();
   }
 
   function navigateTo(name) {
@@ -350,6 +524,7 @@
     patientRr.textContent = patient.respiratoryRate;
     patientSpo2.textContent = patient.oxygen;
     additionalInfo.value = patient.additionalInfo;
+    saveState();
   }
 
   function appendToCalculator(value) {
@@ -511,7 +686,7 @@
           getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
           renderVitalsView();
         } else {
-          state.chatData.response = "Recording now. Tap Stop Recording when you're finished speaking.";
+          state.chatData.statusMessage = "Recording now. Tap Stop Recording when you're finished speaking.";
           renderVoiceChat();
         }
       }
@@ -521,7 +696,7 @@
           getProtocolRecord(target).statusMessage = "Recording stopped. Transcribing and extracting vitals now.";
           renderVitalsView();
         } else {
-          state.chatData.response = "Recording stopped. Backend is transcribing.";
+          state.chatData.statusMessage = "Recording stopped. Backend is transcribing.";
           renderVoiceChat();
         }
       }
@@ -530,7 +705,7 @@
           getProtocolRecord(target).statusMessage = "The backend is still processing the previous recording.";
           renderVitalsView();
         } else {
-          state.chatData.response = "The backend is still processing the previous recording.";
+          state.chatData.statusMessage = "The backend is still processing the previous recording.";
           renderVoiceChat();
         }
       }
@@ -541,7 +716,7 @@
           getProtocolRecord(target).statusMessage = "No audio captured. Please try again.";
           renderVitalsView();
         } else {
-          state.chatData.response = "No audio captured. Please try again.";
+          state.chatData.statusMessage = "No audio captured. Please try again.";
           renderVoiceChat();
         }
       }
@@ -553,7 +728,7 @@
         getProtocolRecord(failedTarget).statusMessage = error.message;
         renderVitalsView();
       } else {
-        state.chatData.response = error.message;
+        state.chatData.statusMessage = error.message;
         renderVoiceChat();
       }
     }
@@ -581,11 +756,13 @@
         renderVitalsView();
       } else if (state.pendingRecordingTarget === "voice") {
         if (status.recording) {
-          state.chatData.response = "Recording now. Tap Stop Recording when you're finished speaking.";
+          state.chatData.statusMessage = "Recording now. Tap Stop Recording when you're finished speaking.";
         } else if (status.transcribing) {
-          state.chatData.response = "Transcribing your voice request.";
+          state.chatData.statusMessage = "Transcribing your voice request.";
         } else if (status.last_error) {
-          state.chatData.response = status.last_error;
+          state.chatData.statusMessage = status.last_error;
+        } else {
+          state.chatData.statusMessage = "";
         }
         renderVoiceChat();
       }
@@ -607,12 +784,19 @@
 
       state.lastHandledAt = latest.created_at;
       const target = state.pendingRecordingTarget;
+      const shouldUpdateVoiceChat = target === "voice" || (state.currentScreen === "voice" && !!latest.llm_response);
 
-      if (target === "voice") {
+      if (shouldUpdateVoiceChat) {
         state.chatData.summary = latest.text || state.chatData.summary;
-        state.chatData.input = state.chatData.summary;
+        state.chatData.input = "";
         state.chatData.response = latest.llm_response || "Voice request captured.";
+        state.chatData.statusMessage = "";
+        appendChatMessage("user", state.chatData.summary);
+        appendChatMessage("assistant", state.chatData.response);
         renderVoiceChat();
+        if (!latest.llm_response) {
+          await syncLatestVoiceResponse();
+        }
         if (latest.llm_response && state.speakerEnabled) {
           if (state.activeAudio) {
             state.activeAudio.pause();
@@ -637,13 +821,56 @@
     } catch (error) {
       if (!/No transcription has been published yet/i.test(error.message)) {
         if (state.pendingRecordingTarget === "voice") {
-          state.chatData.response = error.message;
+          state.chatData.statusMessage = error.message;
           renderVoiceChat();
         } else if (isProtocolTarget(state.pendingRecordingTarget || state.selectedProtocol)) {
           getProtocolRecord(state.pendingRecordingTarget || state.selectedProtocol).statusMessage = error.message;
           renderVitalsView();
         }
       }
+    }
+  }
+
+  async function submitVoiceText() {
+    const message = voiceTextInput.value.trim();
+    if (!message) {
+      return;
+    }
+
+    state.chatData.input = message;
+    state.chatData.summary = message;
+    state.chatData.statusMessage = "Sending your message...";
+    appendChatMessage("user", message);
+    renderVoiceChat();
+
+    try {
+      const result = await fetchJson(API.pipelineText, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ text: message })
+      });
+
+      state.lastHandledAt = result.created_at || state.lastHandledAt;
+      state.chatData.summary = result.text || message;
+      state.chatData.response = result.llm_response || "Voice request captured.";
+      state.chatData.input = "";
+      state.chatData.statusMessage = "";
+      appendChatMessage("assistant", state.chatData.response);
+      renderVoiceChat();
+
+      if (result.llm_response && state.speakerEnabled) {
+        if (state.activeAudio) {
+          state.activeAudio.pause();
+        }
+        state.activeAudio = new Audio(API.latestAudio + "?t=" + Date.now());
+        state.activeAudio.play().catch(function () {});
+      }
+    } catch (error) {
+      state.chatData.statusMessage = error.message;
+      state.chatData.input = message;
+      renderVoiceChat();
     }
   }
 
@@ -711,12 +938,23 @@
     toggleRecording("voice");
   });
 
-  voiceTextInput.addEventListener("change", function (event) {
-    if (event.target.value.trim()) {
-      state.chatData.input = event.target.value.trim();
-      state.chatData.summary = event.target.value.trim();
-      state.chatData.response = "Typed message captured. Use the microphone or backend transcription to continue.";
-      renderVoiceChat();
+  voiceSendButton.addEventListener("click", function () {
+    submitVoiceText();
+  });
+
+  voiceClearButton.addEventListener("click", function () {
+    resetVoiceConversation();
+  });
+
+  voiceTextInput.addEventListener("input", function (event) {
+    state.chatData.input = event.target.value;
+    saveState();
+  });
+
+  voiceTextInput.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitVoiceText();
     }
   });
 
@@ -795,7 +1033,7 @@
     }
   });
 
-  state.chatData.summary = voiceSummary.textContent.trim();
+  restoreState();
   renderPatientInfo();
   renderVitalsView();
   renderVoiceChat();
@@ -803,6 +1041,7 @@
   updateCalculatorLabels();
   applyTextScale(Number(textSizeSlider.value));
   renderMicButtons("idle");
+  showScreen(state.currentScreen);
   syncRecordingStatus();
   syncLatestResult();
   window.setInterval(syncRecordingStatus, 1500);

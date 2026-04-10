@@ -177,23 +177,22 @@ Cultures drawn</textarea>
             </button>
           </header>
 
-          <div class="chat-feed" id="chat-feed">
-            <article class="chat-bubble chat-bubble--user">
-              <p class="chat-bubble__text" id="voice-summary">
-                6y, 44 lb fever, tachycardia, BP 88/52, lactate 4.2, cultures drawn, ceftriaxone running.
-              </p>
-            </article>
-            <article class="chat-bubble">
-              <p class="chat-bubble__text" id="assistant-response">
-                Summary and next steps will appear here after transcription or chatbot response.
-              </p>
-            </article>
+          <div class="voice-chat-actions">
+            <button class="ghost-button" type="button" id="voice-clear-button">New Conversation</button>
           </div>
 
-          <button class="voice-pad voice-pad--compact" type="button" id="voice-screen-button" aria-label="Start microphone">
-            <i class="fa-solid fa-microphone"></i>
-          </button>
-          <input class="text-input" id="voice-text-input" type="text" placeholder="Start typing here..." />
+          <div class="chat-feed" id="chat-feed"></div>
+
+          <div class="chat-input-bar">
+            <div class="chat-status" id="voice-chat-status" aria-live="polite"></div>
+            <input class="text-input chat-input-bar__field" id="voice-text-input" type="text" placeholder="Type a follow-up..." />
+            <button class="chat-send-button" type="button" id="voice-send-button" aria-label="Send typed message">
+              <i class="fa-solid fa-paper-plane"></i>
+            </button>
+            <button class="voice-pad voice-pad--compact chat-input-bar__mic" type="button" id="voice-screen-button" aria-label="Start microphone">
+              <i class="fa-solid fa-microphone"></i>
+            </button>
+          </div>
         </section>
 
         <section class="screen" id="screen-guidelines">
