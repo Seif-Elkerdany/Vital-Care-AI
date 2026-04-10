@@ -57,6 +57,7 @@
           <button class="voice-pad" type="button" id="vitals-voice-button" aria-label="Start microphone">
             <i class="fa-solid fa-microphone"></i>
           </button>
+          <div class="status-panel" id="voice-status-message">Press Record Voice to capture the patient's vitals.</div>
 
           <div class="field-block">
             <label class="field-label" for="transcript-preview">Transcript</label>
@@ -179,7 +180,7 @@ Cultures drawn</textarea>
           <div class="chat-feed" id="chat-feed">
             <article class="chat-bubble chat-bubble--user">
               <p class="chat-bubble__text" id="voice-summary">
-                6y, 20kg fever, tachycardia, BP 88/52, lactate 4.2, cultures drawn, ceftriaxone running.
+                6y, 44 lb fever, tachycardia, BP 88/52, lactate 4.2, cultures drawn, ceftriaxone running.
               </p>
             </article>
             <article class="chat-bubble">
@@ -276,6 +277,13 @@ Cultures drawn</textarea>
               <span><i class="fa-solid fa-moon"></i> Dark Mode</span>
               <input id="dark-mode-toggle" type="checkbox" />
             </label>
+            <label class="select-row">
+              <span><i class="fa-solid fa-ruler-combined"></i> Units</span>
+              <select class="text-input" id="unit-system-select">
+                <option value="us_clinical" selected>US Clinical</option>
+                <option value="metric">Metric</option>
+              </select>
+            </label>
             <label class="slider-row">
               <span><i class="fa-solid fa-font"></i> Adjust Text Size</span>
               <input id="text-size-slider" type="range" min="14" max="22" value="16" />
@@ -303,8 +311,8 @@ Cultures drawn</textarea>
           </header>
 
           <section class="card-panel">
-            <label class="field-label" for="weight-input">Patient Weight (kg)</label>
-            <input class="text-input" id="weight-input" type="number" min="0" step="0.1" value="20" />
+            <label class="field-label" for="weight-input" id="weight-input-label">Patient Weight (lb)</label>
+            <input class="text-input" id="weight-input" type="number" min="0" step="0.1" value="44" />
           </section>
 
           <section class="card-panel">
@@ -358,11 +366,11 @@ Cultures drawn</textarea>
 
           <section class="card-panel">
             <label class="field-label" for="notes-box">Clinical Notes</label>
-            <textarea class="text-box text-box--notes" id="notes-box">Patient reassessed. Perfusion improving after initial bolus. Repeat lactate pending.</textarea>
+            <textarea class="text-box text-box--notes" id="notes-box"></textarea>
           </section>
         </section>
 
-        <div class="app-copyright">Copyright 2026 Vital Care AI</div>
+        <div class="app-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</div>
       </section>
     </main>
 

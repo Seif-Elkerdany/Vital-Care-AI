@@ -92,15 +92,8 @@
     notes: document.getElementById("screen-notes")
   };
 
-  const state = {
-    currentScreen: "home",
-    screenHistory: [],
-    selectedProtocol: "",
-    stepCompletion: [],
-    speakerEnabled: true,
-    activeAudio: null,
-    lastHandledAt: null,
-    patient: {
+  function createBlankPatient() {
+    return {
       age: "N/A",
       weight: "N/A",
       bloodPressure: "N/A",
@@ -109,6 +102,34 @@
       respiratoryRate: "N/A",
       oxygen: "N/A",
       additionalInfo: "N/A"
+    };
+  }
+
+  const state = {
+    currentScreen: "home",
+    screenHistory: [],
+    selectedProtocol: "",
+    stepCompletion: [],
+    speakerEnabled: true,
+    activeAudio: null,
+    lastHandledAt: null,
+    pendingRecordingTarget: null,
+    protocolData: {
+      "Sepsis": {
+        transcript: "",
+        statusMessage: "Press Record Voice to capture the patient's vitals.",
+        patient: createBlankPatient()
+      },
+      "Septic Shock": {
+        transcript: "",
+        statusMessage: "Press Record Voice to capture the patient's vitals.",
+        patient: createBlankPatient()
+      }
+    },
+    chatData: {
+      summary: "",
+      response: "Summary and next steps will appear here after transcription or chatbot response.",
+      input: ""
     }
   };
 
@@ -128,6 +149,7 @@
   const patientSpo2 = document.getElementById("patient-spo2");
   const voiceSummary = document.getElementById("voice-summary");
   const assistantResponse = document.getElementById("assistant-response");
+  const voiceStatusMessage = document.getElementById("voice-status-message");
   const guidelineImage = document.getElementById("guideline-image");
   const guidelineFallback = document.getElementById("guideline-fallback");
   const guidelineZoomTrigger = document.getElementById("guideline-zoom-trigger");
@@ -137,11 +159,16 @@
   const calculateButton = document.getElementById("calculate-button");
   const calculatorResult = document.getElementById("calculator-result");
   const weightInput = document.getElementById("weight-input");
+  const weightInputLabel = document.getElementById("weight-input-label");
   const bolusInput = document.getElementById("bolus-input");
   const calculatorDisplay = document.getElementById("calculator-display");
   const textSizeSlider = document.getElementById("text-size-slider");
   const darkModeToggle = document.getElementById("dark-mode-toggle");
-  const speakerButtons = [document.getElementById("voice-screen-button"), document.getElementById("vitals-voice-button")];
+  const unitSystemSelect = document.getElementById("unit-system-select");
+  const vitalsVoiceButton = document.getElementById("vitals-voice-button");
+  const voiceScreenButton = document.getElementById("voice-screen-button");
+  const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
+  const voiceTextInput = document.getElementById("voice-text-input");
   const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
     return !element.matches("i, .fa-solid, .fa-regular, .fa-brands");
   });
@@ -154,12 +181,28 @@
     }
   });
 
-  function setMicButtonIcon(button, listening) {
-    button.innerHTML = listening
-      ? '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>'
-      : '<i class="fa-solid fa-circle"></i><span class="voice-pad__label">Record Voice</span>';
-    button.setAttribute("aria-label", listening ? "Stop recording" : "Start recording");
-    button.classList.toggle("voice-pad--recording", listening);
+  function setMicButtonState(button, state) {
+    if (state === "recording") {
+      button.innerHTML = '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>';
+      button.setAttribute("aria-label", "Stop recording");
+      button.classList.add("voice-pad--recording");
+      button.classList.remove("voice-pad--working");
+      button.disabled = false;
+      return;
+    }
+    if (state === "transcribing") {
+      button.innerHTML = '<i class="fa-solid fa-wave-square"></i><span class="voice-pad__label">Transcribing...</span>';
+      button.setAttribute("aria-label", "Transcribing audio");
+      button.classList.remove("voice-pad--recording");
+      button.classList.add("voice-pad--working");
+      button.disabled = true;
+      return;
+    }
+    button.innerHTML = '<i class="fa-solid fa-microphone"></i><span class="voice-pad__label">Record Voice</span>';
+    button.setAttribute("aria-label", "Start recording");
+    button.classList.remove("voice-pad--recording");
+    button.classList.remove("voice-pad--working");
+    button.disabled = false;
   }
 
   function showScreen(name) {
@@ -170,6 +213,38 @@
     if (screens[name]) {
       screens[name].scrollTop = 0;
     }
+  }
+
+  function isProtocolTarget(target) {
+    return target === "Sepsis" || target === "Septic Shock";
+  }
+
+  function getProtocolRecord(protocolName) {
+    return state.protocolData[protocolName] || state.protocolData.Sepsis;
+  }
+
+  function renderMicButtons(uiState) {
+    const target = state.pendingRecordingTarget;
+    setMicButtonState(vitalsVoiceButton, isProtocolTarget(target) ? uiState : "idle");
+    setMicButtonState(voiceScreenButton, target === "voice" ? uiState : "idle");
+  }
+
+  function renderVoiceChat() {
+    voiceSummary.textContent = state.chatData.summary || "Start typing or record a question to begin.";
+    assistantResponse.textContent = state.chatData.response;
+    voiceTextInput.value = state.chatData.input;
+  }
+
+  function renderVitalsView() {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      transcriptPreview.value = "";
+      voiceStatusMessage.textContent = "Press Record Voice to capture the patient's vitals.";
+      return;
+    }
+
+    const record = getProtocolRecord(state.selectedProtocol);
+    transcriptPreview.value = record.transcript;
+    voiceStatusMessage.textContent = record.statusMessage;
   }
 
   function navigateTo(name) {
@@ -204,15 +279,77 @@
     });
   }
 
+  function poundsToKilograms(value) {
+    return value / 2.20462;
+  }
+
+  function kilogramsToPounds(value) {
+    return value * 2.20462;
+  }
+
+  function fahrenheitToCelsius(value) {
+    return (value - 32) * 5 / 9;
+  }
+
+  function celsiusToFahrenheit(value) {
+    return (value * 9 / 5) + 32;
+  }
+
+  function formatNumber(value) {
+    const rounded = Math.round(value * 10) / 10;
+    return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  }
+
+  function formatWeightCanonical(weightText) {
+    const match = String(weightText || "").match(/(\d+(?:\.\d+)?)/);
+    if (!match) {
+      return "N/A";
+    }
+    const pounds = Number(match[1]);
+    if (unitSystemSelect.value === "metric") {
+      return formatNumber(poundsToKilograms(pounds)) + " kg";
+    }
+    return formatNumber(pounds) + " lbs";
+  }
+
+  function formatTemperatureCanonical(tempText) {
+    const match = String(tempText || "").match(/(\d+(?:\.\d+)?)/);
+    if (!match) {
+      return "N/A";
+    }
+    const fahrenheit = Number(match[1]);
+    if (unitSystemSelect.value === "metric") {
+      return formatNumber(fahrenheitToCelsius(fahrenheit)) + " C";
+    }
+    return formatNumber(fahrenheit) + " F";
+  }
+
+  function updateCalculatorLabels() {
+    if (unitSystemSelect.value === "metric") {
+      weightInputLabel.textContent = "Patient Weight (kg)";
+      if (!weightInput.dataset.convertedToMetric) {
+        weightInput.value = formatNumber(poundsToKilograms(Number(weightInput.value || 0)));
+        weightInput.dataset.convertedToMetric = "true";
+      }
+    } else {
+      weightInputLabel.textContent = "Patient Weight (lb)";
+      if (weightInput.dataset.convertedToMetric === "true") {
+        weightInput.value = formatNumber(kilogramsToPounds(Number(weightInput.value || 0)));
+        weightInput.dataset.convertedToMetric = "false";
+      }
+    }
+  }
+
   function renderPatientInfo() {
-    patientAge.textContent = state.patient.age;
-    patientWeight.textContent = state.patient.weight;
-    patientBp.textContent = state.patient.bloodPressure;
-    patientHr.textContent = state.patient.heartRate;
-    patientTemp.textContent = state.patient.temperature;
-    patientRr.textContent = state.patient.respiratoryRate;
-    patientSpo2.textContent = state.patient.oxygen;
-    additionalInfo.value = state.patient.additionalInfo;
+    const patient = getProtocolRecord(state.selectedProtocol).patient;
+    patientAge.textContent = patient.age;
+    patientWeight.textContent = formatWeightCanonical(patient.weight);
+    patientBp.textContent = patient.bloodPressure;
+    patientHr.textContent = patient.heartRate;
+    patientTemp.textContent = formatTemperatureCanonical(patient.temperature);
+    patientRr.textContent = patient.respiratoryRate;
+    patientSpo2.textContent = patient.oxygen;
+    additionalInfo.value = patient.additionalInfo;
   }
 
   function appendToCalculator(value) {
@@ -303,42 +440,54 @@
     updateStepsProgress();
   }
 
-  function parseTranscript(text) {
-    const normalized = text.toLowerCase();
+  function formatPounds(value) {
+    return formatNumber(value) + " lbs";
+  }
 
-    // Reset all fields to N/A before filling in what was found
-    state.patient.age = "N/A";
-    state.patient.weight = "N/A";
-    state.patient.heartRate = "N/A";
-    state.patient.bloodPressure = "N/A";
-    state.patient.temperature = "N/A";
-    state.patient.respiratoryRate = "N/A";
-    state.patient.oxygen = "N/A";
-    state.patient.additionalInfo = "N/A";
+  function getLastMatch(text, pattern) {
+    const matches = Array.from(text.matchAll(pattern));
+    return matches.length ? matches[matches.length - 1] : null;
+  }
+
+  function parsePatientTranscript(text) {
+    const normalized = text.toLowerCase();
+    const patient = createBlankPatient();
 
     const NUM = "(?:is|of|at|:)?\\s*(\\d+(?:\\.\\d+)?)";
-    const ageMatch = normalized.match(/(\d+)\s*(?:years old|year old|years|year|yrs|yr)/);
-    const weightMatch = normalized.match(/(?:weight|weighs?)\s+(?:is\s+|of\s+)?(\d+)\s*(?:lbs|pounds|kg)/) ||
-                        normalized.match(/(\d+)\s*(?:lbs|pounds|kg)/);
-    const hrMatch = normalized.match(new RegExp("(?:heart rate|heart-rate|hr)\\s+" + NUM)) ||
-                    normalized.match(/(\d+)\s*bpm/);
-    const bpMatch = normalized.match(/(?:blood pressure|bp)\s+(?:is\s+|of\s+|at\s+)?(\d+)\s*(?:\/|over)\s*(\d+)/) ||
-                    normalized.match(/(\d+)\s*(?:\/|over)\s*(\d+)\s*(?:mmhg)?/);
-    const tempMatch = normalized.match(new RegExp("(?:temperature|temp)\\s+" + NUM));
-    const rrMatch = normalized.match(new RegExp("(?:respiration rate|respiratory rate|rr)\\s+" + NUM));
-    const spo2Match = normalized.match(new RegExp("(?:spo2|sp o2|oxygen saturation|oxygen)\\s+" + NUM));
+    const ageMatch = getLastMatch(normalized, /(\d+)\s*(?:years old|year old|years|year|yrs|yr|y\/o|yo|y\b)/g);
+    const weightMatch = getLastMatch(normalized, /(?:weight|weighs?)\s+(?:is\s+|of\s+)?(\d+(?:\.\d+)?)\s*(lbs|pounds|kg|kilogram|kilograms)/g) ||
+                        getLastMatch(normalized, /(\d+(?:\.\d+)?)\s*(lbs|pounds|kg|kilogram|kilograms)/g);
+    const hrMatch = getLastMatch(normalized, new RegExp("(?:heart rate|heart-rate|hr)\\s+" + NUM, "g")) ||
+                    getLastMatch(normalized, /(\d+)\s*bpm/g);
+    const bpMatch = getLastMatch(normalized, /(?:blood pressure|bp)\s+(?:is\s+|of\s+|at\s+)?(\d+)\s*(?:\/|over)\s*(\d+)/g) ||
+                    getLastMatch(normalized, /(\d+)\s*(?:\/|over)\s*(\d+)\s*(?:mmhg)?/g);
+    const tempMatch = getLastMatch(normalized, /(?:temperature|temp)\s+(?:is|of|at|:)?\s*(\d+(?:\.\d+)?)\s*(f|fahrenheit|c|celsius)?/g) ||
+                     getLastMatch(normalized, /(\d+(?:\.\d+)?)\s*(f|fahrenheit|c|celsius)\b/g);
+    const rrMatch = getLastMatch(normalized, new RegExp("(?:respiration rate|respiratory rate|rr)\\s+" + NUM, "g"));
+    const spo2Match = getLastMatch(normalized, new RegExp("(?:spo2|sp o2|oxygen saturation|oxygen)\\s+" + NUM, "g"));
 
-    if (ageMatch) state.patient.age = ageMatch[1];
-    if (weightMatch) state.patient.weight = weightMatch[1] + (normalized.includes("kg") ? " kg" : " lbs");
-    if (hrMatch) state.patient.heartRate = (hrMatch[1] || hrMatch[2] || hrMatch[0].match(/\d+/)[0]) + " bpm";
-    if (bpMatch) state.patient.bloodPressure = bpMatch[1] + "/" + bpMatch[2] + " mmHg";
-    if (tempMatch) state.patient.temperature = tempMatch[1] + " F";
-    if (rrMatch) state.patient.respiratoryRate = rrMatch[1] + " breaths/min";
-    if (spo2Match) state.patient.oxygen = spo2Match[1] + "%";
-
-    if (normalized.trim()) {
-      voiceSummary.textContent = text.trim();
+    if (ageMatch) patient.age = ageMatch[1];
+    if (weightMatch) {
+      const numericWeight = Number(weightMatch[1]);
+      const unit = (weightMatch[2] || "").toLowerCase();
+      patient.weight = unit === "kg" || unit === "kilogram" || unit === "kilograms"
+        ? formatPounds(kilogramsToPounds(numericWeight))
+        : formatPounds(numericWeight);
     }
+    if (hrMatch) patient.heartRate = (hrMatch[1] || hrMatch[2] || hrMatch[0].match(/\d+/)[0]) + " bpm";
+    if (bpMatch) patient.bloodPressure = bpMatch[1] + "/" + bpMatch[2] + " mmHg";
+    if (tempMatch) {
+      const numericTemp = Number(tempMatch[1]);
+      const tempUnit = (tempMatch[2] || "f").toLowerCase();
+      const fahrenheit = tempUnit === "c" || tempUnit === "celsius"
+        ? celsiusToFahrenheit(numericTemp)
+        : numericTemp;
+      patient.temperature = formatNumber(fahrenheit) + " F";
+    }
+    if (rrMatch) patient.respiratoryRate = rrMatch[1] + " breaths/min";
+    if (spo2Match) patient.oxygen = spo2Match[1] + "%";
+
+    return patient;
   }
 
   async function fetchJson(url, options) {
@@ -352,24 +501,100 @@
     return response.json();
   }
 
-  async function toggleRecording() {
+  async function toggleRecording(target) {
     try {
+      state.pendingRecordingTarget = target;
       const result = await fetchJson(API.toggle, { method: "POST" });
-      const listening = result.state === "recording_started";
-      speakerButtons.forEach(function (button) {
-        setMicButtonIcon(button, listening);
-      });
+      if (result.state === "recording_started") {
+        renderMicButtons("recording");
+        if (isProtocolTarget(target)) {
+          getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
+          renderVitalsView();
+        } else {
+          state.chatData.response = "Recording now. Tap Stop Recording when you're finished speaking.";
+          renderVoiceChat();
+        }
+      }
       if (result.state === "transcribing") {
-        assistantResponse.textContent = "Recording stopped. Backend is transcribing.";
+        renderMicButtons("transcribing");
+        if (isProtocolTarget(target)) {
+          getProtocolRecord(target).statusMessage = "Recording stopped. Transcribing and extracting vitals now.";
+          renderVitalsView();
+        } else {
+          state.chatData.response = "Recording stopped. Backend is transcribing.";
+          renderVoiceChat();
+        }
       }
       if (result.state === "busy") {
-        assistantResponse.textContent = "The backend is still processing the previous recording.";
+        if (isProtocolTarget(target)) {
+          getProtocolRecord(target).statusMessage = "The backend is still processing the previous recording.";
+          renderVitalsView();
+        } else {
+          state.chatData.response = "The backend is still processing the previous recording.";
+          renderVoiceChat();
+        }
       }
       if (result.state === "no_audio") {
-        assistantResponse.textContent = "No audio captured. Please try again.";
+        state.pendingRecordingTarget = null;
+        renderMicButtons("idle");
+        if (isProtocolTarget(target)) {
+          getProtocolRecord(target).statusMessage = "No audio captured. Please try again.";
+          renderVitalsView();
+        } else {
+          state.chatData.response = "No audio captured. Please try again.";
+          renderVoiceChat();
+        }
       }
     } catch (error) {
-      assistantResponse.textContent = error.message;
+      const failedTarget = target;
+      state.pendingRecordingTarget = null;
+      renderMicButtons("idle");
+      if (isProtocolTarget(failedTarget)) {
+        getProtocolRecord(failedTarget).statusMessage = error.message;
+        renderVitalsView();
+      } else {
+        state.chatData.response = error.message;
+        renderVoiceChat();
+      }
+    }
+  }
+
+  async function syncRecordingStatus() {
+    try {
+      const status = await fetchJson(API.status);
+      const uiState = status.recording ? "recording" : (status.transcribing ? "transcribing" : "idle");
+      renderMicButtons(uiState);
+
+      if (isProtocolTarget(state.pendingRecordingTarget)) {
+        const record = getProtocolRecord(state.pendingRecordingTarget);
+        if (status.recording) {
+          record.statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
+        } else if (status.transcribing) {
+          record.statusMessage = "Transcribing audio and extracting the patient's vitals.";
+        } else if (status.last_error) {
+          record.statusMessage = status.last_error;
+        } else if (status.latest_text) {
+          record.statusMessage = "Vitals captured. Review the transcript below.";
+        } else {
+          record.statusMessage = "Press Record Voice to capture the patient's vitals.";
+        }
+        renderVitalsView();
+      } else if (state.pendingRecordingTarget === "voice") {
+        if (status.recording) {
+          state.chatData.response = "Recording now. Tap Stop Recording when you're finished speaking.";
+        } else if (status.transcribing) {
+          state.chatData.response = "Transcribing your voice request.";
+        } else if (status.last_error) {
+          state.chatData.response = status.last_error;
+        }
+        renderVoiceChat();
+      }
+    } catch (error) {
+      renderMicButtons("idle");
+      if (isProtocolTarget(state.selectedProtocol)) {
+        getProtocolRecord(state.selectedProtocol).statusMessage = "Backend connection unavailable. Start the backend to use voice recording.";
+        renderVitalsView();
+      }
     }
   }
 
@@ -381,27 +606,43 @@
       }
 
       state.lastHandledAt = latest.created_at;
-      transcriptPreview.value = latest.text;
-      parseTranscript(latest.text);
-      renderPatientInfo();
+      const target = state.pendingRecordingTarget;
 
-      if (latest.llm_response) {
-        assistantResponse.textContent = latest.llm_response;
-        state.patient.additionalInfo = latest.llm_response;
-        renderPatientInfo();
-        if (state.speakerEnabled) {
+      if (target === "voice") {
+        state.chatData.summary = latest.text || state.chatData.summary;
+        state.chatData.input = state.chatData.summary;
+        state.chatData.response = latest.llm_response || "Voice request captured.";
+        renderVoiceChat();
+        if (latest.llm_response && state.speakerEnabled) {
           if (state.activeAudio) {
             state.activeAudio.pause();
           }
           state.activeAudio = new Audio(API.latestAudio + "?t=" + Date.now());
           state.activeAudio.play().catch(function () {});
         }
-      } else {
-        assistantResponse.textContent = "Patient update captured for the selected protocol.";
+      } else if (isProtocolTarget(target)) {
+        const record = getProtocolRecord(target);
+        record.transcript = latest.text || "";
+        record.patient = parsePatientTranscript(record.transcript);
+        record.statusMessage = "Vitals captured. Review the transcript below.";
+        if (latest.llm_response) {
+          record.patient.additionalInfo = latest.llm_response;
+        }
+        renderVitalsView();
+        renderPatientInfo();
       }
+
+      state.pendingRecordingTarget = null;
+      renderMicButtons("idle");
     } catch (error) {
       if (!/No transcription has been published yet/i.test(error.message)) {
-        assistantResponse.textContent = error.message;
+        if (state.pendingRecordingTarget === "voice") {
+          state.chatData.response = error.message;
+          renderVoiceChat();
+        } else if (isProtocolTarget(state.pendingRecordingTarget || state.selectedProtocol)) {
+          getProtocolRecord(state.pendingRecordingTarget || state.selectedProtocol).statusMessage = error.message;
+          renderVitalsView();
+        }
       }
     }
   }
@@ -414,12 +655,16 @@
         navigateTo("steps");
         return;
       }
+      renderVitalsView();
       navigateTo("vitals");
     });
   });
 
   document.querySelectorAll("[data-screen-target]").forEach(function (button) {
     button.addEventListener("click", function () {
+      if (button.dataset.screenTarget === "voice") {
+        renderVoiceChat();
+      }
       navigateTo(button.dataset.screenTarget);
     });
   });
@@ -441,7 +686,9 @@
   });
 
   document.getElementById("confirm-vitals-button").addEventListener("click", function () {
-    parseTranscript(transcriptPreview.value);
+    const record = getProtocolRecord(state.selectedProtocol);
+    record.transcript = transcriptPreview.value;
+    record.patient = parsePatientTranscript(record.transcript);
     renderPatientInfo();
     navigateTo("patient");
   });
@@ -455,13 +702,21 @@
     navigateTo("home");
   });
 
-  document.getElementById("vitals-voice-button").addEventListener("click", toggleRecording);
-  document.getElementById("voice-screen-button").addEventListener("click", toggleRecording);
+  vitalsVoiceButton.addEventListener("click", function () {
+    if (isProtocolTarget(state.selectedProtocol)) {
+      toggleRecording(state.selectedProtocol);
+    }
+  });
+  voiceScreenButton.addEventListener("click", function () {
+    toggleRecording("voice");
+  });
 
-  document.getElementById("voice-text-input").addEventListener("change", function (event) {
+  voiceTextInput.addEventListener("change", function (event) {
     if (event.target.value.trim()) {
-      voiceSummary.textContent = event.target.value.trim();
-      assistantResponse.textContent = "Typed message captured. Use the microphone or backend transcription to continue.";
+      state.chatData.input = event.target.value.trim();
+      state.chatData.summary = event.target.value.trim();
+      state.chatData.response = "Typed message captured. Use the microphone or backend transcription to continue.";
+      renderVoiceChat();
     }
   });
 
@@ -488,10 +743,14 @@
   });
 
   calculateButton.addEventListener("click", function () {
-    const weight = Number(weightInput.value || 0);
+    const enteredWeight = Number(weightInput.value || 0);
     const bolus = Number(bolusInput.value || 0);
-    const total = weight * bolus;
-    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL at " + bolus.toFixed(0) + " mL/kg";
+    const weightKg = unitSystemSelect.value === "metric" ? enteredWeight : poundsToKilograms(enteredWeight);
+    const total = weightKg * bolus;
+    const weightLabel = unitSystemSelect.value === "metric"
+      ? formatNumber(enteredWeight) + " kg"
+      : formatNumber(enteredWeight) + " lb";
+    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL for " + weightLabel + " at " + bolus.toFixed(0) + " mL/kg";
   });
 
   document.querySelectorAll("[data-calc-value]").forEach(function (button) {
@@ -515,6 +774,11 @@
     applyTextScale(Number(event.target.value));
   });
 
+  unitSystemSelect.addEventListener("change", function () {
+    updateCalculatorLabels();
+    renderPatientInfo();
+  });
+
   darkModeToggle.addEventListener("change", function (event) {
     document.body.classList.toggle("theme-dark", event.target.checked);
   });
@@ -526,15 +790,21 @@
   });
 
   additionalInfo.addEventListener("change", function () {
-    state.patient.additionalInfo = additionalInfo.value;
+    if (isProtocolTarget(state.selectedProtocol)) {
+      getProtocolRecord(state.selectedProtocol).patient.additionalInfo = additionalInfo.value;
+    }
   });
 
+  state.chatData.summary = voiceSummary.textContent.trim();
   renderPatientInfo();
+  renderVitalsView();
+  renderVoiceChat();
   renderSteps();
+  updateCalculatorLabels();
   applyTextScale(Number(textSizeSlider.value));
-  speakerButtons.forEach(function (button) {
-    setMicButtonIcon(button, false);
-  });
+  renderMicButtons("idle");
+  syncRecordingStatus();
   syncLatestResult();
+  window.setInterval(syncRecordingStatus, 1500);
   window.setInterval(syncLatestResult, 1500);
 })();
