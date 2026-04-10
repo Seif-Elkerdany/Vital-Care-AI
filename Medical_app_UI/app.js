@@ -135,6 +135,9 @@
       input: "",
       statusMessage: "",
       history: []
+    },
+    settings: {
+      micThreshold: 35
     }
   };
 
@@ -184,7 +187,8 @@
         selectedProtocol: state.selectedProtocol,
         lastHandledAt: state.lastHandledAt,
         protocolData: state.protocolData,
-        chatData: state.chatData
+        chatData: state.chatData,
+        settings: state.settings
       }));
     } catch (error) {
       // Ignore storage failures so the app still works in private browsing or strict environments.
@@ -227,6 +231,11 @@
             })
           : []
       };
+      state.settings = {
+        micThreshold: saved.settings && Number.isFinite(Number(saved.settings.micThreshold))
+          ? Math.max(0, Math.min(100, Number(saved.settings.micThreshold)))
+          : 35
+      };
     } catch (error) {
       window.sessionStorage.removeItem(STORAGE_KEY);
     }
@@ -263,6 +272,13 @@
   const textSizeSlider = document.getElementById("text-size-slider");
   const darkModeToggle = document.getElementById("dark-mode-toggle");
   const unitSystemSelect = document.getElementById("unit-system-select");
+  const micThresholdSlider = document.getElementById("mic-threshold-slider");
+  const micThresholdValue = document.getElementById("mic-threshold-value");
+  const micThresholdMarker = document.getElementById("mic-threshold-marker");
+  const micLevelFill = document.getElementById("mic-level-fill");
+  const micLevelReadout = document.getElementById("mic-level-readout");
+  const micThresholdState = document.getElementById("mic-threshold-state");
+  const micThresholdTestButton = document.getElementById("mic-threshold-test-button");
   const vitalsVoiceButton = document.getElementById("vitals-voice-button");
   const voiceScreenButton = document.getElementById("voice-screen-button");
   const voiceSendButton = document.getElementById("voice-send-button");
@@ -274,6 +290,11 @@
     return !element.matches("i, .fa-solid, .fa-regular, .fa-brands");
   });
   const baseTextSizes = new Map();
+  let micThresholdStream = null;
+  let micThresholdAudioContext = null;
+  let micThresholdAnalyser = null;
+  let micThresholdAnimationFrame = null;
+  let micThresholdData = null;
 
   scalableTextElements.forEach(function (element) {
     const fontSize = parseFloat(window.getComputedStyle(element).fontSize);
@@ -306,7 +327,90 @@
     button.disabled = false;
   }
 
+  function renderMicThresholdTester(level) {
+    const threshold = state.settings.micThreshold;
+    const safeLevel = Number.isFinite(level) ? Math.max(0, Math.min(100, level)) : 0;
+    micThresholdSlider.value = String(threshold);
+    micThresholdValue.textContent = String(threshold);
+    micThresholdMarker.style.left = threshold + "%";
+    micLevelFill.style.width = safeLevel + "%";
+    micLevelReadout.textContent = "Current level: " + Math.round(safeLevel);
+
+    if (micThresholdStream) {
+      micThresholdState.textContent = safeLevel >= threshold ? "Threshold reached" : "Below threshold";
+    } else {
+      micThresholdState.textContent = "Waiting to start";
+    }
+  }
+
+  function stopMicThresholdTester() {
+    if (micThresholdAnimationFrame !== null) {
+      window.cancelAnimationFrame(micThresholdAnimationFrame);
+      micThresholdAnimationFrame = null;
+    }
+    if (micThresholdStream) {
+      micThresholdStream.getTracks().forEach(function (track) {
+        track.stop();
+      });
+      micThresholdStream = null;
+    }
+    if (micThresholdAudioContext) {
+      micThresholdAudioContext.close().catch(function () {});
+      micThresholdAudioContext = null;
+    }
+    micThresholdAnalyser = null;
+    micThresholdData = null;
+    micThresholdTestButton.textContent = "Start Tester";
+    renderMicThresholdTester(0);
+  }
+
+  async function startMicThresholdTester() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error("This browser does not support Web Audio.");
+      }
+
+      micThresholdStream = stream;
+      micThresholdAudioContext = new AudioContextClass();
+      const source = micThresholdAudioContext.createMediaStreamSource(stream);
+      micThresholdAnalyser = micThresholdAudioContext.createAnalyser();
+      micThresholdAnalyser.fftSize = 1024;
+      micThresholdData = new Uint8Array(micThresholdAnalyser.fftSize);
+      source.connect(micThresholdAnalyser);
+      micThresholdTestButton.textContent = "Stop Tester";
+
+      function updateLevel() {
+        if (!micThresholdAnalyser || !micThresholdData) {
+          return;
+        }
+
+        micThresholdAnalyser.getByteTimeDomainData(micThresholdData);
+        let peak = 0;
+        for (let index = 0; index < micThresholdData.length; index += 1) {
+          const centered = Math.abs(micThresholdData[index] - 128) / 128;
+          if (centered > peak) {
+            peak = centered;
+          }
+        }
+
+        renderMicThresholdTester(peak * 100);
+        micThresholdAnimationFrame = window.requestAnimationFrame(updateLevel);
+      }
+
+      updateLevel();
+    } catch (error) {
+      stopMicThresholdTester();
+      micThresholdState.textContent = error.message || "Microphone access failed.";
+      micThresholdState.classList.add("is-visible");
+    }
+  }
+
   function showScreen(name) {
+    if (name !== "settings") {
+      stopMicThresholdTester();
+    }
     Object.keys(screens).forEach(function (key) {
       screens[key].classList.toggle("screen--active", key === name);
     });
@@ -958,6 +1062,20 @@
     }
   });
 
+  micThresholdSlider.addEventListener("input", function (event) {
+    state.settings.micThreshold = Number(event.target.value);
+    renderMicThresholdTester(Number(micLevelFill.style.width.replace("%", "")) || 0);
+    saveState();
+  });
+
+  micThresholdTestButton.addEventListener("click", function () {
+    if (micThresholdStream) {
+      stopMicThresholdTester();
+      return;
+    }
+    startMicThresholdTester();
+  });
+
   guidelineImage.addEventListener("error", function () {
     guidelineImage.classList.add("is-hidden");
     guidelineZoomTrigger.classList.add("is-hidden");
@@ -1037,6 +1155,7 @@
   renderPatientInfo();
   renderVitalsView();
   renderVoiceChat();
+  renderMicThresholdTester(0);
   renderSteps();
   updateCalculatorLabels();
   applyTextScale(Number(textSizeSlider.value));

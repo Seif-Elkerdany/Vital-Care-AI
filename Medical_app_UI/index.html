@@ -291,6 +291,24 @@ Cultures drawn</textarea>
               <span><i class="fa-solid fa-microphone"></i> Microphone Threshold</span>
               <input id="mic-threshold-slider" type="range" min="0" max="100" value="35" />
             </label>
+            <section class="threshold-tester" aria-labelledby="mic-threshold-tester-label">
+              <div class="threshold-tester__header">
+                <strong id="mic-threshold-tester-label">Threshold Tester</strong>
+                <span class="threshold-tester__value" id="mic-threshold-value">35</span>
+              </div>
+              <p class="threshold-tester__copy" id="mic-threshold-helper">
+                Start the tester, speak normally, and raise or lower the threshold until the bar crosses it at the level you want.
+              </p>
+              <div class="threshold-meter" aria-hidden="true">
+                <div class="threshold-meter__fill" id="mic-level-fill"></div>
+                <div class="threshold-meter__marker" id="mic-threshold-marker"></div>
+              </div>
+              <div class="threshold-tester__stats">
+                <span id="mic-level-readout">Current level: 0</span>
+                <span id="mic-threshold-state">Waiting to start</span>
+              </div>
+              <button class="action-button threshold-tester__button" type="button" id="mic-threshold-test-button">Start Tester</button>
+            </section>
             <label class="slider-row">
               <span><i class="fa-solid fa-volume-high"></i> Volume</span>
               <input id="volume-slider" type="range" min="0" max="100" value="70" />
