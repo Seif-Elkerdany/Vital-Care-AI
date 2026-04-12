@@ -178,8 +178,15 @@ Cultures drawn</textarea>
           </header>
 
           <div class="voice-chat-actions">
+            <button class="ghost-button" type="button" id="voice-debug-toggle" aria-expanded="false" aria-controls="voice-debug-panel">Debug View</button>
             <button class="ghost-button" type="button" id="voice-clear-button">New Conversation</button>
           </div>
+
+          <section class="voice-debug-panel is-hidden" id="voice-debug-panel" aria-label="Voice pipeline debug panel">
+            <div class="voice-debug-panel__meta" id="voice-debug-meta"></div>
+            <div class="voice-debug-panel__error" id="voice-debug-error"></div>
+            <div class="voice-debug-panel__body" id="voice-debug-body"></div>
+          </section>
 
           <div class="chat-feed" id="chat-feed"></div>
 

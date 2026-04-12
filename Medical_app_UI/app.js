@@ -108,6 +108,72 @@
     };
   }
 
+  function createBlankDebugSnapshot() {
+    return {
+      question: "",
+      structuredQuery: "",
+      ragError: "",
+      pipelineElapsedSeconds: null,
+      llmElapsedSeconds: null,
+      ttsElapsedSeconds: null,
+      createdAt: "",
+      retrievals: []
+    };
+  }
+
+  function parseFiniteNumber(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  function truncateDebugText(text, limit) {
+    const cleaned = String(text || "").trim();
+    if (!cleaned || cleaned.length <= limit) {
+      return cleaned;
+    }
+    return cleaned.slice(0, Math.max(0, limit - 1)).trimEnd() + "…";
+  }
+
+  function sanitizeDebugSnapshot(snapshot) {
+    const fallback = createBlankDebugSnapshot();
+    const safeSnapshot = snapshot && typeof snapshot === "object" ? snapshot : {};
+
+    return {
+      question: typeof safeSnapshot.question === "string" ? safeSnapshot.question : fallback.question,
+      structuredQuery: typeof safeSnapshot.structuredQuery === "string" ? safeSnapshot.structuredQuery : fallback.structuredQuery,
+      ragError: typeof safeSnapshot.ragError === "string" ? safeSnapshot.ragError : fallback.ragError,
+      pipelineElapsedSeconds: parseFiniteNumber(safeSnapshot.pipelineElapsedSeconds),
+      llmElapsedSeconds: parseFiniteNumber(safeSnapshot.llmElapsedSeconds),
+      ttsElapsedSeconds: parseFiniteNumber(safeSnapshot.ttsElapsedSeconds),
+      createdAt: typeof safeSnapshot.createdAt === "string" ? safeSnapshot.createdAt : fallback.createdAt,
+      retrievals: Array.isArray(safeSnapshot.retrievals)
+        ? safeSnapshot.retrievals.map(function (item) {
+            const meta = item && typeof item === "object" && item.metadata && typeof item.metadata === "object"
+              ? item.metadata
+              : {};
+            const sources = Array.isArray(meta.query_sources)
+              ? meta.query_sources.filter(function (value) {
+                  return typeof value === "string" && value.trim();
+                })
+              : (typeof meta.query_source === "string" && meta.query_source.trim() ? [meta.query_source.trim()] : []);
+
+            return {
+              pageNumber: parseFiniteNumber(meta.page_number),
+              score: parseFiniteNumber(item && item.score),
+              sectionLabel: typeof meta.section_label === "string" ? meta.section_label : "",
+              querySources: sources,
+              text: truncateDebugText(item && typeof item.text === "string" ? item.text : "", 480)
+            };
+          }).filter(function (item) {
+            return !!item.text;
+          })
+        : fallback.retrievals
+    };
+  }
+
   const state = {
     currentScreen: "home",
     screenHistory: [],
@@ -134,7 +200,9 @@
       response: "Summary and next steps will appear here after transcription or chatbot response.",
       input: "",
       statusMessage: "",
-      history: []
+      history: [],
+      debugVisible: false,
+      debugSnapshot: createBlankDebugSnapshot()
     },
     settings: {
       micThreshold: 35
@@ -229,7 +297,9 @@
                 text: item.text
               };
             })
-          : []
+          : [],
+        debugVisible: !!(saved.chatData && saved.chatData.debugVisible),
+        debugSnapshot: sanitizeDebugSnapshot(saved.chatData && saved.chatData.debugSnapshot)
       };
       state.settings = {
         micThreshold: saved.settings && Number.isFinite(Number(saved.settings.micThreshold))
@@ -283,7 +353,12 @@
   const voiceScreenButton = document.getElementById("voice-screen-button");
   const voiceSendButton = document.getElementById("voice-send-button");
   const voiceClearButton = document.getElementById("voice-clear-button");
+  const voiceDebugToggle = document.getElementById("voice-debug-toggle");
   const voiceChatStatus = document.getElementById("voice-chat-status");
+  const voiceDebugPanel = document.getElementById("voice-debug-panel");
+  const voiceDebugMeta = document.getElementById("voice-debug-meta");
+  const voiceDebugError = document.getElementById("voice-debug-error");
+  const voiceDebugBody = document.getElementById("voice-debug-body");
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
   const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
@@ -443,12 +518,103 @@
     state.chatData.history.push(createChatMessage(role, cleaned));
   }
 
+  function setVoiceDebugSnapshot(result) {
+    state.chatData.debugSnapshot = sanitizeDebugSnapshot({
+      question: result && typeof result.text === "string" ? result.text : state.chatData.summary,
+      structuredQuery: result && typeof result.structured_query === "string" ? result.structured_query : "",
+      ragError: result && typeof result.rag_error === "string" ? result.rag_error : "",
+      pipelineElapsedSeconds: result ? result.pipeline_elapsed_seconds : null,
+      llmElapsedSeconds: result ? result.llm_elapsed_seconds : null,
+      ttsElapsedSeconds: result ? result.tts_elapsed_seconds : null,
+      createdAt: result && typeof result.created_at === "string" ? result.created_at : state.lastHandledAt,
+      retrievals: result && Array.isArray(result.retrievals) ? result.retrievals : []
+    });
+  }
+
+  function formatDebugSeconds(value) {
+    return Number.isFinite(value) ? value.toFixed(2) + "s" : "n/a";
+  }
+
+  function renderVoiceDebugPanel() {
+    const isVisible = !!state.chatData.debugVisible;
+    const snapshot = sanitizeDebugSnapshot(state.chatData.debugSnapshot);
+
+    voiceDebugToggle.classList.toggle("ghost-button--active", isVisible);
+    voiceDebugToggle.setAttribute("aria-expanded", isVisible ? "true" : "false");
+    voiceDebugPanel.classList.toggle("is-hidden", !isVisible);
+
+    if (!isVisible) {
+      return;
+    }
+
+    voiceDebugMeta.innerHTML = "";
+    voiceDebugBody.innerHTML = "";
+
+    [
+      ["Question", snapshot.question || "Not available yet."],
+      ["Structured Query", snapshot.structuredQuery || "Not available yet."],
+      ["Pipeline Time", formatDebugSeconds(snapshot.pipelineElapsedSeconds)],
+      ["LLM Time", formatDebugSeconds(snapshot.llmElapsedSeconds)],
+      ["TTS Time", formatDebugSeconds(snapshot.ttsElapsedSeconds)]
+    ].forEach(function (entry) {
+      const row = document.createElement("div");
+      row.className = "voice-debug-row";
+
+      const label = document.createElement("div");
+      label.className = "voice-debug-row__label";
+      label.textContent = entry[0];
+
+      const value = document.createElement("div");
+      value.className = "voice-debug-row__value";
+      value.textContent = entry[1];
+
+      row.appendChild(label);
+      row.appendChild(value);
+      voiceDebugMeta.appendChild(row);
+    });
+
+    voiceDebugError.textContent = snapshot.ragError || "";
+    voiceDebugError.classList.toggle("is-visible", !!snapshot.ragError);
+
+    if (!snapshot.retrievals.length) {
+      const empty = document.createElement("div");
+      empty.className = "voice-debug-empty";
+      empty.textContent = "No retrieval debug data has been captured yet.";
+      voiceDebugBody.appendChild(empty);
+      return;
+    }
+
+    snapshot.retrievals.forEach(function (retrieval, index) {
+      const card = document.createElement("article");
+      card.className = "voice-debug-hit";
+
+      const title = document.createElement("div");
+      title.className = "voice-debug-hit__title";
+      title.textContent = [
+        "Hit " + (index + 1),
+        retrieval.pageNumber ? "p." + retrieval.pageNumber : null,
+        Number.isFinite(retrieval.score) ? "score " + retrieval.score.toFixed(3) : null,
+        retrieval.querySources.length ? retrieval.querySources.join(", ") : null,
+        retrieval.sectionLabel || null
+      ].filter(Boolean).join(" · ");
+
+      const text = document.createElement("div");
+      text.className = "voice-debug-hit__text";
+      text.textContent = retrieval.text;
+
+      card.appendChild(title);
+      card.appendChild(text);
+      voiceDebugBody.appendChild(card);
+    });
+  }
+
   function resetVoiceConversation() {
     state.chatData.summary = "";
     state.chatData.response = "Summary and next steps will appear here after transcription or chatbot response.";
     state.chatData.input = "";
     state.chatData.statusMessage = "";
     state.chatData.history = [];
+    state.chatData.debugSnapshot = createBlankDebugSnapshot();
     state.lastHandledAt = null;
     state.pendingRecordingTarget = null;
     if (state.activeAudio) {
@@ -487,6 +653,7 @@
     voiceTextInput.value = state.chatData.input;
     voiceChatStatus.textContent = state.chatData.statusMessage || "";
     voiceChatStatus.classList.toggle("is-visible", !!state.chatData.statusMessage);
+    renderVoiceDebugPanel();
     chatFeed.scrollTop = chatFeed.scrollHeight;
     saveState();
   }
@@ -895,6 +1062,7 @@
         state.chatData.input = "";
         state.chatData.response = latest.llm_response || "Voice request captured.";
         state.chatData.statusMessage = "";
+        setVoiceDebugSnapshot(latest);
         appendChatMessage("user", state.chatData.summary);
         appendChatMessage("assistant", state.chatData.response);
         renderVoiceChat();
@@ -961,6 +1129,7 @@
       state.chatData.response = result.llm_response || "Voice request captured.";
       state.chatData.input = "";
       state.chatData.statusMessage = "";
+      setVoiceDebugSnapshot(result);
       appendChatMessage("assistant", state.chatData.response);
       renderVoiceChat();
 
@@ -1048,6 +1217,11 @@
 
   voiceClearButton.addEventListener("click", function () {
     resetVoiceConversation();
+  });
+
+  voiceDebugToggle.addEventListener("click", function () {
+    state.chatData.debugVisible = !state.chatData.debugVisible;
+    renderVoiceChat();
   });
 
   voiceTextInput.addEventListener("input", function (event) {

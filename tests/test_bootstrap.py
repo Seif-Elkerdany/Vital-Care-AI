@@ -57,6 +57,69 @@ class BootstrapTests(unittest.TestCase):
         create_app.assert_called_once_with("service")
         uvicorn_run.assert_called_once_with("app", host="127.0.0.1", port=8000, reload=False)
 
+    def test_build_service_wraps_gemini_backend_initialization_errors(self):
+        args = types.SimpleNamespace(
+            model="openai/whisper-medium",
+            language="en",
+            disable_llm=False,
+            disable_tts=True,
+            disable_rag=True,
+            llm_backend="gemini",
+            llm_model="gpt-oss-120b",
+            llm_base_url="https://llm-api.arc.vt.edu/api/v1",
+            llm_api_key=None,
+            gemini_model="gemini-2.5-flash",
+            gemini_api_key="test-key",
+            pipeline_top_k=None,
+            tts_voice="af_heart",
+            tts_lang_code="a",
+            tts_sample_rate=24000,
+            tts_output_dir="stt/output_audio",
+        )
+
+        with patch(
+            "backend_api.LLM.gemini_flash.GeminiFlashClient",
+            side_effect=RuntimeError("google-genai missing"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Failed to initialize the `gemini` LLM backend: google-genai missing",
+            ):
+                bootstrap.build_service(args)
+
+    def test_build_service_wraps_rag_initialization_errors_with_config_context(self):
+        args = types.SimpleNamespace(
+            model="openai/whisper-medium",
+            language="en",
+            disable_llm=False,
+            disable_tts=True,
+            disable_rag=False,
+            llm_backend="gemini",
+            llm_model="gpt-oss-120b",
+            llm_base_url="https://llm-api.arc.vt.edu/api/v1",
+            llm_api_key=None,
+            gemini_model="gemini-2.5-flash",
+            gemini_api_key="test-key",
+            pipeline_top_k=None,
+            tts_voice="af_heart",
+            tts_lang_code="a",
+            tts_sample_rate=24000,
+            tts_output_dir="stt/output_audio",
+        )
+
+        with patch(
+            "backend_api.LLM.gemini_flash.GeminiFlashClient",
+            return_value=object(),
+        ), patch(
+            "backend_api.RAG.RAGService",
+            side_effect=RuntimeError("embedding model unavailable"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"Failed to initialize the RAG service \(collection `medical_documents`, embedding model `sentence-transformers/embeddinggemma-300m-medical`\): embedding model unavailable",
+            ):
+                bootstrap.build_service(args)
+
 
 if __name__ == "__main__":
     unittest.main()

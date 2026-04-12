@@ -85,6 +85,7 @@ class QdrantRAGStore:
                 "page_number": chunk.page_number,
                 "chunk_index": chunk_index,
                 "chunk_index_in_page": chunk.chunk_index_in_page,
+                "section_label": chunk.section_label,
                 "chunk_id": f"{document.document_id}:{chunk_index}",
                 "text": chunk.text,
             }

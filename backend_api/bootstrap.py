@@ -117,23 +117,36 @@ def build_service(args) -> SpeechToTextService:
         from backend_api.LLM.llm_engine import LLMEngine
         from backend_api.LLM.pipeline import LLMRAGPipeline, OpenAICompatClient
         from backend_api.RAG import RAGService
+        from backend_api.RAG.config import RAGConfig
 
-        if args.llm_backend == "gemini":
-            llm_client = GeminiFlashClient(
-                api_key=args.gemini_api_key,
-                model=args.gemini_model,
-            )
-        else:
-            llm_engine = LLMEngine(
-                model=args.llm_model,
-                base_url=args.llm_base_url,
-                api_key=args.llm_api_key,
-            )
-            llm_client = OpenAICompatClient(llm_engine)
+        try:
+            if args.llm_backend == "gemini":
+                llm_client = GeminiFlashClient(
+                    api_key=args.gemini_api_key,
+                    model=args.gemini_model,
+                )
+            else:
+                llm_engine = LLMEngine(
+                    model=args.llm_model,
+                    base_url=args.llm_base_url,
+                    api_key=args.llm_api_key,
+                )
+                llm_client = OpenAICompatClient(llm_engine)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to initialize the `{args.llm_backend}` LLM backend: {exc}"
+            ) from exc
 
         rag_service = None
         if AppConfig.rag_enabled and not args.disable_rag:
-            rag_service = RAGService()
+            rag_config = RAGConfig()
+            try:
+                rag_service = RAGService()
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to initialize the RAG service "
+                    f"(collection `{rag_config.collection_name}`, embedding model `{rag_config.embedding_model}`): {exc}"
+                ) from exc
 
         pipeline_engine = LLMRAGPipeline(
             llm_client=llm_client,
@@ -145,11 +158,14 @@ def build_service(args) -> SpeechToTextService:
     if AppConfig.tts_enabled and not args.disable_tts:
         from backend_api.TTS.tts_engine import TTSEngine
 
-        tts_engine = TTSEngine(
-            voice=args.tts_voice,
-            lang_code=args.tts_lang_code,
-            sample_rate=args.tts_sample_rate,
-        )
+        try:
+            tts_engine = TTSEngine(
+                voice=args.tts_voice,
+                lang_code=args.tts_lang_code,
+                sample_rate=args.tts_sample_rate,
+            )
+        except Exception as exc:
+            raise RuntimeError(f"Failed to initialize TTS: {exc}") from exc
 
     return SpeechToTextService(
         model_id=args.model,

@@ -14,6 +14,6 @@ class RAGConfig:
         "RAG_EMBEDDING_MODEL",
         "sentence-transformers/embeddinggemma-300m-medical",
     )
-    chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "900"))
-    chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
+    chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "600"))
+    chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "120"))
     top_k: int = int(os.getenv("RAG_TOP_K", "5"))

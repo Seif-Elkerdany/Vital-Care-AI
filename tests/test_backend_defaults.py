@@ -7,6 +7,7 @@ from backend_api.LLM.prompts import (
     PIPELINE_ANSWER_INSTRUCTION,
     PIPELINE_QUERY_INSTRUCTION,
 )
+from backend_api.RAG.config import RAGConfig
 from backend_api.STT.config import AppConfig
 from backend_api.TTS.config import TTSConfig
 
@@ -19,6 +20,8 @@ class BackendDefaultsTests(unittest.TestCase):
         self.assertIn("Return exactly one single-line query and nothing else.", PIPELINE_QUERY_INSTRUCTION)
         self.assertIn("You are a clinical guideline assistant for pediatric sepsis and septic shock.", PIPELINE_ANSWER_INSTRUCTION)
         self.assertIn("SUPPORTED_CONCERN:", PIPELINE_ANSWER_INSTRUCTION)
+        self.assertIn("answer directly from that snippet", PIPELINE_ANSWER_INSTRUCTION)
+        self.assertIn("When the question asks about multiple items, answer each supported item explicitly.", PIPELINE_ANSWER_INSTRUCTION)
 
     def test_stt_defaults_are_preserved(self):
         self.assertEqual(AppConfig.model_id, "openai/whisper-medium")
@@ -35,6 +38,13 @@ class BackendDefaultsTests(unittest.TestCase):
         self.assertEqual(config.default_voice, "af_heart")
         self.assertEqual(config.dtype, "float32")
         self.assertIsNone(config.channels)
+
+    def test_rag_defaults_match_hardened_pipeline_configuration(self):
+        config = RAGConfig()
+        self.assertEqual(config.embedding_model, "sentence-transformers/embeddinggemma-300m-medical")
+        self.assertEqual(config.chunk_size, 600)
+        self.assertEqual(config.chunk_overlap, 120)
+        self.assertEqual(config.top_k, 5)
 
 
 if __name__ == "__main__":

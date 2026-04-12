@@ -595,6 +595,7 @@ body.theme-dark .step-card--complete .step-body {
 
 .voice-chat-actions {
   display: flex;
+  gap: 10px;
   justify-content: flex-end;
   margin-top: 14px;
 }
@@ -608,6 +609,101 @@ body.theme-dark .step-card--complete .step-body {
   color: var(--muted);
   font-size: 13px;
   font-weight: 700;
+}
+
+.ghost-button--active {
+  border-color: #3d92d9;
+  background: rgba(61, 146, 217, 0.12);
+  color: #1e5d91;
+}
+
+body.theme-dark .ghost-button--active {
+  background: rgba(61, 146, 217, 0.2);
+  color: #8fc9ff;
+}
+
+.voice-debug-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+body.theme-dark .voice-debug-panel {
+  background: rgba(14, 21, 31, 0.82);
+}
+
+.voice-debug-panel__meta,
+.voice-debug-panel__body {
+  display: grid;
+  gap: 8px;
+}
+
+.voice-debug-row {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(61, 146, 217, 0.08);
+}
+
+body.theme-dark .voice-debug-row {
+  background: rgba(61, 146, 217, 0.16);
+}
+
+.voice-debug-row__label,
+.voice-debug-hit__title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.voice-debug-row__value,
+.voice-debug-hit__text,
+.voice-debug-empty {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.voice-debug-panel__error {
+  display: none;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(193, 65, 65, 0.12);
+  color: #a83c3c;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.voice-debug-panel__error.is-visible {
+  display: block;
+}
+
+body.theme-dark .voice-debug-panel__error {
+  background: rgba(193, 65, 65, 0.18);
+  color: #ffb1b1;
+}
+
+.voice-debug-hit {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(61, 146, 217, 0.18);
+  background: rgba(61, 146, 217, 0.06);
+}
+
+body.theme-dark .voice-debug-hit {
+  border-color: rgba(143, 201, 255, 0.22);
+  background: rgba(61, 146, 217, 0.12);
 }
 
 .chat-input-bar {
