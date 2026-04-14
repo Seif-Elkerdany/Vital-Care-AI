@@ -49,3 +49,9 @@ class ToggleRecordingResponse(BaseModel):
 
 class TextInputRequest(BaseModel):
     text: str
+
+
+class StepsResponse(BaseModel):
+    llm_response: str
+    retrievals: list[dict[str, Any]] | None = None
+    rag_error: str | None = None

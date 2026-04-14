@@ -6,6 +6,7 @@
     latestTranscription: "http://localhost:8000/transcriptions/latest",
     latestResponse: "http://localhost:8000/responses/latest",
     pipelineText: "http://localhost:8000/pipeline/text",
+    pipelineSteps: "http://localhost:8000/pipeline/steps",
     latestAudio: "http://localhost:8000/responses/latest/audio/mp3"
   };
 
@@ -844,46 +845,136 @@
     updateStepsProgress();
   }
 
-  function renderSteps() {
-    const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
-    stepsProtocolTitle.textContent = protocol.title;
-    stepsProtocolTiming.textContent = protocol.timing;
+  function renderStepsFromData(title, timing, steps, preCompleted) {
+    stepsProtocolTitle.textContent = title;
+    stepsProtocolTiming.textContent = timing;
     stepsList.innerHTML = "";
-    state.stepCompletion = protocol.steps.map(function () {
-      return false;
+    state.stepCompletion = steps.map(function (_, i) {
+      return Array.isArray(preCompleted) ? !!preCompleted[i] : false;
     });
 
-    protocol.steps.forEach(function (step, index) {
+    steps.forEach(function (step, index) {
+      const complete = state.stepCompletion[index];
       const wrapper = document.createElement("button");
-      wrapper.className = "step-card";
+      wrapper.className = "step-card" + (complete ? " step-card--complete" : "");
       wrapper.type = "button";
       wrapper.dataset.stepIndex = String(index);
-      wrapper.setAttribute("aria-pressed", "false");
+      wrapper.setAttribute("aria-pressed", complete ? "true" : "false");
 
       const number = document.createElement("div");
       number.className = "step-number";
-      number.textContent = String(index + 1);
+      number.innerHTML = complete ? '<i class="fa-solid fa-check"></i>' : String(index + 1);
 
       const body = document.createElement("div");
       body.className = "step-body";
 
-      const title = document.createElement("h3");
-      title.textContent = step.title;
+      const titleEl = document.createElement("h3");
+      titleEl.textContent = step.title;
 
       const text = document.createElement("p");
       text.textContent = step.body;
 
-      body.appendChild(title);
+      body.appendChild(titleEl);
       body.appendChild(text);
       wrapper.appendChild(number);
       wrapper.appendChild(body);
-      wrapper.addEventListener("click", function () {
-        toggleStep(index);
-      });
+      wrapper.addEventListener("click", function () { toggleStep(index); });
       stepsList.appendChild(wrapper);
     });
 
     updateStepsProgress();
+  }
+
+  function renderSteps() {
+    const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+    renderStepsFromData(protocol.title, protocol.timing, protocol.steps);
+  }
+
+  function renderStepsLoading() {
+    const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+    stepsProtocolTitle.textContent = protocol.title;
+    stepsProtocolTiming.textContent = "Generating personalised steps...";
+    stepsList.innerHTML = '<p style="padding:12px;color:var(--muted);font-size:14px;">Analysing patient vitals and generating steps\u2026</p>';
+    state.stepCompletion = [];
+    updateStepsProgress();
+  }
+
+  function buildStepsPrompt(patient) {
+    const protocol = state.selectedProtocol || "Sepsis";
+    return [
+      "You are a clinical decision support AI. Based on the patient vitals below, list exactly 5 to 7 numbered action steps a medical team should take within the first 3 hours for " + protocol + ".",
+      "Format EACH step exactly as: [number]. [Short title]: [One or two sentence description].",
+      "Output ONLY the numbered steps. No intro, no conclusion, no extra text.",
+      "",
+      "Patient:",
+      "Age: " + patient.age,
+      "Weight: " + patient.weight,
+      "Heart Rate: " + patient.heartRate,
+      "Blood Pressure: " + patient.bloodPressure,
+      "Temperature: " + patient.temperature,
+      "Respiratory Rate: " + patient.respiratoryRate,
+      "SpO2: " + patient.oxygen,
+      "Additional Notes: " + patient.additionalInfo
+    ].join("\n");
+  }
+
+  // Keywords that indicate a step has already been completed based on patient data
+  var STEP_COMPLETION_SIGNALS = [
+    { keywords: ["lactate", "serum lactate", "lactic acid"],        stepPatterns: [/lactate/i] },
+    { keywords: ["blood culture", "cultures drawn", "culture"],     stepPatterns: [/blood culture/i, /cultures/i] },
+    { keywords: ["antibiotic", "abx", "vanc", "pip", "mero"],      stepPatterns: [/antibiotic/i, /antimicrobial/i] },
+    { keywords: ["fluid bolus", "bolus given", "litre", "liter", "iv fluid", "normal saline", "ns bolus", "lactated"],
+                                                                    stepPatterns: [/fluid/i, /resuscitat/i, /bolus/i] },
+    { keywords: ["iv access", "iv line", "peripheral iv", "central line", "piv"],
+                                                                    stepPatterns: [/iv access/i, /vascular access/i, /access/i] },
+    { keywords: ["ecg", "ekg", "12-lead", "twelve lead"],           stepPatterns: [/ecg/i, /ekg/i, /cardiac monitor/i] },
+    { keywords: ["chest x-ray", "chest xray", "cxr"],              stepPatterns: [/chest x.ray/i, /cxr/i, /imaging/i] },
+    { keywords: ["urine output", "foley", "catheter", "uop"],       stepPatterns: [/urine/i, /foley/i, /output monitor/i] },
+    { keywords: ["o2", "oxygen", "nasal cannula", "face mask", "non-rebreather", "high flow"],
+                                                                    stepPatterns: [/oxygen/i, /o2/i, /supplemental/i] },
+  ];
+
+  function detectCompletedSteps(patient, steps) {
+    var transcript = (getProtocolRecord(state.selectedProtocol).transcript || "").toLowerCase();
+    var notes = (patient.additionalInfo || "").toLowerCase();
+    var combined = transcript + " " + notes;
+
+    return steps.map(function (step) {
+      var stepText = (step.title + " " + step.body).toLowerCase();
+      return STEP_COMPLETION_SIGNALS.some(function (signal) {
+        // Does the step match this signal?
+        var stepMatches = signal.stepPatterns.some(function (p) { return p.test(stepText); });
+        if (!stepMatches) return false;
+        // Was this already reported in the patient data?
+        return signal.keywords.some(function (kw) { return combined.indexOf(kw) !== -1; });
+      });
+    });
+  }
+
+  function parseLLMSteps(text) {
+    // If the response has a STEPS: section, extract only that part
+    var stepsMatch = text.match(/STEPS:\s*\n([\s\S]*)/i);
+    var source = stepsMatch ? stepsMatch[1] : text;
+
+    var lines = source.split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+    var steps = [];
+    var current = null;
+
+    lines.forEach(function (line) {
+      // Match "1. Title: body" or "1. **Title**: body" or "1. Title"
+      var m = line.match(/^\d+[.)]\s+(?:\*{1,2})?([^*\n]+?)(?:\*{1,2})?\s*(?::\s*(.+))?$/);
+      if (m) {
+        if (current) { steps.push(current); }
+        var title = m[1].trim().replace(/\s*\[\d+\]\s*$/, ""); // strip trailing citations
+        var body = m[2] ? m[2].trim().replace(/\s*\[\d+\]\s*/g, "") : "";
+        current = { title: title, body: body };
+      } else if (current && !/^(SUMMARY|CONDITION|SUPPORTED_CONCERN|STEPS):/i.test(line)) {
+        current.body = (current.body ? current.body + " " : "") + line;
+      }
+    });
+
+    if (current) { steps.push(current); }
+    return steps.length ? steps : null;
   }
 
   function formatPounds(value) {
@@ -895,8 +986,31 @@
     return matches.length ? matches[matches.length - 1] : null;
   }
 
+  function normalizeNumbers(text) {
+    var ones = {
+      zero:0, one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8,
+      nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15,
+      sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20,
+      thirty:30, forty:40, fifty:50, sixty:60, seventy:70, eighty:80, ninety:90
+    };
+    // "102 point 4" / "98 decimal 6"
+    text = text.replace(/\b(\w+)\s+(?:point|decimal)\s+(\w+)\b/gi, function(m, a, b) {
+      var na = ones[a.toLowerCase()], nb = ones[b.toLowerCase()];
+      return (na !== undefined && nb !== undefined) ? na + "." + nb : m;
+    });
+    // replace individual word numbers
+    Object.keys(ones).forEach(function(word) {
+      text = text.replace(new RegExp("\\b" + word + "\\b", "gi"), String(ones[word]));
+    });
+    // combine tens+ones written as two tokens: "80 5" → "85"
+    text = text.replace(/\b([2-9]0)\s+([1-9])\b/g, function(m, t, u) { return String(+t + +u); });
+    // hundreds: "1 100" → "100"
+    text = text.replace(/\b([1-9])\s+100\b/g, function(m, n) { return String(+n * 100); });
+    return text;
+  }
+
   function parsePatientTranscript(text) {
-    const normalized = text.toLowerCase();
+    const normalized = normalizeNumbers(text.toLowerCase());
     const patient = createBlankPatient();
 
     const NUM = "(?:is|of|at|:)?\\s*(\\d+(?:\\.\\d+)?)";
@@ -933,7 +1047,88 @@
     if (rrMatch) patient.respiratoryRate = rrMatch[1] + " breaths/min";
     if (spo2Match) patient.oxygen = spo2Match[1] + "%";
 
+    // Extract additional clinical notes — anything that isn't a vital reading
+    var vitalSegmentPatterns = [
+      /heart rate|heart-rate|\bhr\b/,
+      /blood pressure|\bbp\b/,
+      /temperature|\btemp\b/,
+      /respiratory rate|respiration rate|\brr\b/,
+      /oxygen saturation|spo2|sp o2/,
+      /\d+\s*bpm/,
+      /\d+\s*(?:\/|over)\s*\d+/,
+      /\d+(?:\.\d+)?\s*(?:degrees?|fahrenheit|celsius)/,
+      /\byears?\s*old\b|\byrs?\b|\by\/o\b/,
+      /\d+\s*(?:lbs?|pounds?|kg)/,
+      /weighs?/,
+    ];
+    var segments = text.split(/[.,]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 4; });
+    var notesSegments = segments.filter(function(seg) {
+      var segLower = seg.toLowerCase();
+      return !vitalSegmentPatterns.some(function(p) { return p.test(segLower); });
+    });
+    if (notesSegments.length) {
+      patient.additionalInfo = notesSegments.join(". ").replace(/\.\s*\./g, ".").trim();
+    }
+
     return patient;
+  }
+
+  // ── Live browser transcription (interim display only) ────────────────────
+  var liveRecognition = null;
+  var liveRecognitionTarget = null;
+  var liveRecognitionFinal = "";
+
+  function stopLiveTranscript() {
+    if (liveRecognition) {
+      liveRecognition.onresult = null;
+      liveRecognition.onend = null;
+      liveRecognition.onerror = null;
+      try { liveRecognition.stop(); } catch (e) {}
+      liveRecognition = null;
+    }
+    liveRecognitionTarget = null;
+    liveRecognitionFinal = "";
+  }
+
+  function startLiveTranscript(target) {
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { return; }
+
+    stopLiveTranscript();
+    liveRecognitionTarget = target;
+    liveRecognitionFinal = "";
+
+    liveRecognition = new SpeechRecognition();
+    liveRecognition.continuous = true;
+    liveRecognition.interimResults = true;
+    liveRecognition.lang = "en-US";
+
+    liveRecognition.onresult = function (event) {
+      var finalParts = "";
+      var interimPart = "";
+      for (var i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalParts += event.results[i][0].transcript;
+        } else {
+          interimPart += event.results[i][0].transcript;
+        }
+      }
+      liveRecognitionFinal = finalParts;
+      var display = (finalParts + (interimPart ? " " + interimPart : "")).trim();
+      if (isProtocolTarget(liveRecognitionTarget)) {
+        transcriptPreview.value = display;
+      }
+    };
+
+    liveRecognition.onerror = function () { stopLiveTranscript(); };
+    liveRecognition.onend = function () {
+      // Auto-restart while we're still recording so it doesn't time out
+      if (liveRecognition) {
+        try { liveRecognition.start(); } catch (e) {}
+      }
+    };
+
+    try { liveRecognition.start(); } catch (e) { stopLiveTranscript(); }
   }
 
   async function fetchJson(url, options) {
@@ -952,6 +1147,7 @@
       state.pendingRecordingTarget = target;
       const result = await fetchJson(API.toggle, { method: "POST" });
       if (result.state === "recording_started") {
+        startLiveTranscript(target);
         renderMicButtons("recording");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
@@ -962,6 +1158,7 @@
         }
       }
       if (result.state === "transcribing") {
+        stopLiveTranscript();
         renderMicButtons("transcribing");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "Recording stopped. Transcribing and extracting vitals now.";
@@ -981,6 +1178,7 @@
         }
       }
       if (result.state === "no_audio") {
+        stopLiveTranscript();
         state.pendingRecordingTarget = null;
         renderMicButtons("idle");
         if (isProtocolTarget(target)) {
@@ -993,6 +1191,7 @@
       }
     } catch (error) {
       const failedTarget = target;
+      stopLiveTranscript();
       state.pendingRecordingTarget = null;
       renderMicButtons("idle");
       if (isProtocolTarget(failedTarget)) {
@@ -1080,12 +1279,21 @@
         const record = getProtocolRecord(target);
         record.transcript = latest.text || "";
         record.patient = parsePatientTranscript(record.transcript);
-        record.statusMessage = "Vitals captured. Review the transcript below.";
+
         if (latest.llm_response) {
           record.patient.additionalInfo = latest.llm_response;
+          record.statusMessage = "Vitals captured. Review the transcript below.";
+          state.lastHandledAt = latest.created_at;
+          state.pendingRecordingTarget = null;
+          renderMicButtons("idle");
+        } else {
+          // LLM still processing — don't stamp lastHandledAt yet, keep polling
+          record.statusMessage = "Transcript captured. Generating AI summary\u2026";
+          state.lastHandledAt = null;
         }
         renderVitalsView();
         renderPatientInfo();
+        return;
       }
 
       state.pendingRecordingTarget = null;
@@ -1188,14 +1396,46 @@
   document.getElementById("confirm-vitals-button").addEventListener("click", function () {
     const record = getProtocolRecord(state.selectedProtocol);
     record.transcript = transcriptPreview.value;
+    const prevAdditionalInfo = record.patient.additionalInfo;
     record.patient = parsePatientTranscript(record.transcript);
+    if (prevAdditionalInfo && prevAdditionalInfo !== "N/A") {
+      record.patient.additionalInfo = prevAdditionalInfo;
+    }
     renderPatientInfo();
     navigateTo("patient");
   });
 
-  document.getElementById("start-assessment-button").addEventListener("click", function () {
-    renderSteps();
+  document.getElementById("start-assessment-button").addEventListener("click", async function () {
+    renderStepsLoading();
     navigateTo("steps");
+
+    var patient = getProtocolRecord(state.selectedProtocol).patient;
+    var prompt = buildStepsPrompt(patient);
+
+    try {
+      var result = await fetchJson(API.pipelineSteps, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: prompt })
+      });
+
+      console.log("[Steps] Pipeline response:", result.llm_response);
+      var llmSteps = result.llm_response ? parseLLMSteps(result.llm_response) : null;
+      console.log("[Steps] Parsed steps:", llmSteps);
+      if (llmSteps && llmSteps.length > 0) {
+        var protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+        var preCompleted = detectCompletedSteps(patient, llmSteps);
+        console.log("[Steps] Pre-completed:", preCompleted);
+        renderStepsFromData(protocol.title, "Immediate - within 3 hours", llmSteps, preCompleted);
+      } else {
+        console.warn("[Steps] Could not parse LLM steps — falling back to hardcoded.");
+        renderSteps();
+      }
+    } catch (error) {
+      console.error("[Steps] Pipeline fetch failed:", error.message);
+      // Backend unavailable — fall back to hardcoded steps
+      renderSteps();
+    }
   });
 
   finishStepsButton.addEventListener("click", function () {

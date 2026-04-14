@@ -7,6 +7,7 @@ from .schemas import (
     HealthResponse,
     LLMResponseResult,
     RecordingStatusResponse,
+    StepsResponse,
     TextInputRequest,
     ToggleRecordingResponse,
     TranscriptionListResponse,
@@ -64,6 +65,13 @@ def create_app(stt_service):
     @app.post("/pipeline/text", response_model=TranscriptionResult)
     async def process_text(body: TextInputRequest):
         return stt_service.process_text_input(body.text)
+
+    @app.post("/pipeline/steps", response_model=StepsResponse)
+    async def generate_steps(body: TextInputRequest):
+        try:
+            return stt_service.generate_steps(body.text)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
 
     @app.get("/responses/latest", response_model=LLMResponseResult)
     async def latest_response():

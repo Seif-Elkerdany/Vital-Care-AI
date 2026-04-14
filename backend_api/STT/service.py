@@ -430,6 +430,49 @@ class SpeechToTextService:
                 f"MP3 conversion failed (soundfile: {conversion_error}, ffmpeg: {stderr or process.returncode})"
             )
 
+    def generate_steps(self, patient_text: str) -> dict:
+        """Retrieve RAG context then generate numbered clinical steps for the assessment screen."""
+        if self.pipeline_engine is None:
+            raise RuntimeError("Pipeline engine is not configured.")
+
+        from backend_api.LLM.prompts import CLINICAL_DECISION_SUPPORT_PROMPT
+
+        retrievals = []
+        rag_error = None
+        if self.pipeline_engine.rag_service is not None:
+            try:
+                hits = self.pipeline_engine.rag_service.search(
+                    "sepsis management immediate steps antibiotics fluid resuscitation lactate",
+                    top_k=5,
+                )
+                for hit in hits:
+                    retrievals.append(hit)
+            except Exception as exc:
+                rag_error = str(exc)
+
+        context_block = ""
+        if retrievals:
+            lines = []
+            for i, hit in enumerate(retrievals, 1):
+                text = (hit.get("text") or "").replace("\n", " ").strip()[:400]
+                meta = hit.get("metadata") or {}
+                source = meta.get("document_name") or "guideline"
+                page = meta.get("page_number")
+                label = f"{source} p.{page}" if page else source
+                lines.append(f"[{i}] {label}: {text}")
+            context_block = "\n\nRelevant guideline context:\n" + "\n".join(lines)
+
+        full_prompt = patient_text + context_block
+
+        llm_response = self.pipeline_engine.llm_client.generate(
+            full_prompt,
+            system_instruction=CLINICAL_DECISION_SUPPORT_PROMPT,
+            temperature=0.1,
+            max_output_tokens=1024,
+        )
+
+        return {"llm_response": llm_response, "retrievals": retrievals, "rag_error": rag_error}
+
     def status(self):
         latest = self.latest()
         return RecordingStatusResponse(
