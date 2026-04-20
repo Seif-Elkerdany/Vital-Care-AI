@@ -90,8 +90,8 @@
     steps: document.getElementById("screen-steps"),
     voice: document.getElementById("screen-voice"),
     guidelines: document.getElementById("screen-guidelines"),
-    menu: document.getElementById("screen-menu"),
     settings: document.getElementById("screen-settings"),
+    profile: document.getElementById("screen-profile"),
     calculator: document.getElementById("screen-calculator"),
     notes: document.getElementById("screen-notes")
   };
@@ -180,6 +180,10 @@
     screenHistory: [],
     selectedProtocol: "",
     stepCompletion: [],
+    teamAssignments: [],
+    protocolStartTime: null,
+    protocolTimerInterval: null,
+    abxCountdownInterval: null,
     speakerEnabled: true,
     activeAudio: null,
     lastHandledAt: null,
@@ -334,12 +338,6 @@
   const guidelineLightbox = document.getElementById("guideline-lightbox");
   const guidelineLightboxImage = document.getElementById("guideline-lightbox-image");
   const guidelineLightboxClose = document.getElementById("guideline-lightbox-close");
-  const calculateButton = document.getElementById("calculate-button");
-  const calculatorResult = document.getElementById("calculator-result");
-  const weightInput = document.getElementById("weight-input");
-  const weightInputLabel = document.getElementById("weight-input-label");
-  const bolusInput = document.getElementById("bolus-input");
-  const calculatorDisplay = document.getElementById("calculator-display");
   const textSizeSlider = document.getElementById("text-size-slider");
   const darkModeToggle = document.getElementById("dark-mode-toggle");
   const unitSystemSelect = document.getElementById("unit-system-select");
@@ -380,8 +378,11 @@
   });
 
   function setMicButtonState(button, state) {
+    var isBox = button && button.classList.contains("chat-mic-box");
     if (state === "recording") {
-      button.innerHTML = '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>';
+      button.innerHTML = isBox
+        ? '<i class="fa-solid fa-stop"></i><span>Stop Recording</span>'
+        : '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>';
       button.setAttribute("aria-label", "Stop recording");
       button.classList.add("voice-pad--recording");
       button.classList.remove("voice-pad--working");
@@ -389,14 +390,18 @@
       return;
     }
     if (state === "transcribing") {
-      button.innerHTML = '<i class="fa-solid fa-wave-square"></i><span class="voice-pad__label">Transcribing...</span>';
+      button.innerHTML = isBox
+        ? '<i class="fa-solid fa-wave-square"></i><span>Transcribing...</span>'
+        : '<i class="fa-solid fa-wave-square"></i><span class="voice-pad__label">Transcribing...</span>';
       button.setAttribute("aria-label", "Transcribing audio");
       button.classList.remove("voice-pad--recording");
       button.classList.add("voice-pad--working");
       button.disabled = true;
       return;
     }
-    button.innerHTML = '<i class="fa-solid fa-microphone"></i><span class="voice-pad__label">Record Voice</span>';
+    button.innerHTML = isBox
+      ? '<i class="fa-solid fa-microphone"></i><span>Record Voice</span>'
+      : '<i class="fa-solid fa-microphone"></i><span class="voice-pad__label">Record Voice</span>';
     button.setAttribute("aria-label", "Start recording");
     button.classList.remove("voice-pad--recording");
     button.classList.remove("voice-pad--working");
@@ -698,6 +703,21 @@
       state.screenHistory.push(state.currentScreen);
     }
     showScreen(name);
+
+    if (name === "steps") {
+      startProtocolTimer();
+      var patient = getProtocolRecord(state.selectedProtocol).patient;
+      updateVitalsBar(patient || {});
+    } else {
+      stopProtocolTimer();
+    }
+    if (name === "home") {
+      refreshHomeDashboard();
+    }
+    if (name === "calculator") {
+      var calcScreen = document.getElementById("screen-calculator");
+      if (calcScreen) calcScreen.dispatchEvent(new CustomEvent("calc-enter"));
+    }
   }
 
   function goBack() {
@@ -770,21 +790,7 @@
     return formatNumber(fahrenheit) + " F";
   }
 
-  function updateCalculatorLabels() {
-    if (unitSystemSelect.value === "metric") {
-      weightInputLabel.textContent = "Patient Weight (kg)";
-      if (!weightInput.dataset.convertedToMetric) {
-        weightInput.value = formatNumber(poundsToKilograms(Number(weightInput.value || 0)));
-        weightInput.dataset.convertedToMetric = "true";
-      }
-    } else {
-      weightInputLabel.textContent = "Patient Weight (lb)";
-      if (weightInput.dataset.convertedToMetric === "true") {
-        weightInput.value = formatNumber(kilogramsToPounds(Number(weightInput.value || 0)));
-        weightInput.dataset.convertedToMetric = "false";
-      }
-    }
-  }
+  function updateCalculatorLabels() { /* replaced by guided dosing calculator */ }
 
   function renderPatientInfo() {
     const patient = getProtocolRecord(state.selectedProtocol).patient;
@@ -799,50 +805,55 @@
     saveState();
   }
 
-  function appendToCalculator(value) {
-    if (calculatorDisplay.value === "0" || calculatorDisplay.value === "Error") {
-      calculatorDisplay.value = value;
-      return;
+  function updateStepsProgress(steps) {
+    var total = state.stepCompletion.length;
+    var completed = state.stepCompletion.filter(Boolean).length;
+    var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    var fill = document.getElementById("steps-progress-fill");
+    if (fill) fill.style.width = pct + "%";
+
+    if (total > 0 && completed === total) {
+      stepsProgress.textContent = "Initial Bundle Complete";
+      stepsProgress.style.color = "#2f855a";
+      stepsProgress.style.fontWeight = "700";
+    } else {
+      stepsProgress.textContent = completed + " of " + total + " steps completed";
+      stepsProgress.style.color = "";
+      stepsProgress.style.fontWeight = "";
     }
-    calculatorDisplay.value += value;
-  }
-
-  function clearCalculator() {
-    calculatorDisplay.value = "0";
-  }
-
-  function evaluateCalculator() {
-    try {
-      const sanitized = calculatorDisplay.value.replace(/[^0-9+\-*/.() ]/g, "");
-      const result = Function("return (" + sanitized + ")")();
-      calculatorDisplay.value = Number.isFinite(result) ? String(result) : "Error";
-    } catch (error) {
-      calculatorDisplay.value = "Error";
-    }
-  }
-
-  function updateStepsProgress() {
-    const total = state.stepCompletion.length;
-    const completed = state.stepCompletion.filter(Boolean).length;
-    stepsProgress.textContent = completed + " of " + total + " steps completed";
     finishStepsButton.disabled = total === 0 || completed !== total;
   }
 
-  function toggleStep(index) {
+  var _currentStepsRef = [];
+
+  function toggleStep(index, steps) {
     state.stepCompletion[index] = !state.stepCompletion[index];
-    const card = stepsList.querySelector('[data-step-index="' + index + '"]');
+    var stepsData = steps || _currentStepsRef;
+    var card = stepsList.querySelector('[data-step-index="' + index + '"]');
     if (card) {
-      const complete = state.stepCompletion[index];
+      var complete = state.stepCompletion[index];
       card.classList.toggle("step-card--complete", complete);
       card.setAttribute("aria-pressed", complete ? "true" : "false");
-      const indicator = card.querySelector(".step-number");
+      var indicator = card.querySelector(".step-number");
       if (indicator) {
-        indicator.innerHTML = complete
-          ? '<i class="fa-solid fa-check"></i>'
-          : String(index + 1);
+        indicator.innerHTML = complete ? '<i class="fa-solid fa-check"></i>' : String(index + 1);
       }
+      // Flash animation
+      if (complete) {
+        card.classList.add("step-card--just-completed");
+        setTimeout(function () { card.classList.remove("step-card--just-completed"); }, 700);
+      }
+      // Team assignment
+      if (complete) {
+        var nextRole = (state.stepCompletion.filter(Boolean).length - 1) % TEAM_ROLES.length;
+        state.teamAssignments[index] = nextRole;
+      } else {
+        state.teamAssignments[index] = -1;
+      }
+      renderTeamGrid(stepsData);
     }
-    updateStepsProgress();
+    updateStepsProgress(stepsData);
   }
 
   function renderStepsFromData(title, timing, steps, preCompleted) {
@@ -852,41 +863,55 @@
     state.stepCompletion = steps.map(function (_, i) {
       return Array.isArray(preCompleted) ? !!preCompleted[i] : false;
     });
+    // Init team assignments: pre-completed steps auto-assign to team members
+    state.teamAssignments = [];
+    var roleIndex = 0;
+    state.stepCompletion.forEach(function (done, i) {
+      if (done) { state.teamAssignments[i] = roleIndex % TEAM_ROLES.length; roleIndex++; }
+      else { state.teamAssignments[i] = -1; }
+    });
 
     steps.forEach(function (step, index) {
-      const complete = state.stepCompletion[index];
-      const wrapper = document.createElement("button");
+      var complete = state.stepCompletion[index];
+      var wrapper = document.createElement("button");
       wrapper.className = "step-card" + (complete ? " step-card--complete" : "");
       wrapper.type = "button";
       wrapper.dataset.stepIndex = String(index);
       wrapper.setAttribute("aria-pressed", complete ? "true" : "false");
 
-      const number = document.createElement("div");
+      var number = document.createElement("div");
       number.className = "step-number";
       number.innerHTML = complete ? '<i class="fa-solid fa-check"></i>' : String(index + 1);
 
-      const body = document.createElement("div");
+      var body = document.createElement("div");
       body.className = "step-body";
 
-      const titleEl = document.createElement("h3");
+      var titleEl = document.createElement("h3");
       titleEl.textContent = step.title;
-
-      const text = document.createElement("p");
-      text.textContent = step.body;
-
       body.appendChild(titleEl);
-      body.appendChild(text);
+
+      if (step.body) {
+        var why = document.createElement("p");
+        why.className = "step-why";
+        why.textContent = step.body;
+        body.appendChild(why);
+      }
+
+
       wrapper.appendChild(number);
       wrapper.appendChild(body);
-      wrapper.addEventListener("click", function () { toggleStep(index); });
+      wrapper.addEventListener("click", function () { toggleStep(index, steps); });
       stepsList.appendChild(wrapper);
     });
 
-    updateStepsProgress();
+    renderTeamGrid(steps);
+    updateStepsProgress(steps);
+    startAbxCountdown(steps);
   }
 
   function renderSteps() {
     const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+    _currentStepsRef = protocol.steps;
     renderStepsFromData(protocol.title, protocol.timing, protocol.steps);
   }
 
@@ -979,6 +1004,156 @@
 
   function formatPounds(value) {
     return formatNumber(value) + " lbs";
+  }
+
+  // ── Protocol timer ──────────────────────────────────────────────────────
+  function startProtocolTimer() {
+    stopProtocolTimer();
+    state.protocolStartTime = Date.now();
+    var timerEl = document.getElementById("protocol-timer");
+    state.protocolTimerInterval = setInterval(function () {
+      var elapsed = Math.floor((Date.now() - state.protocolStartTime) / 1000);
+      var m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      var s = String(elapsed % 60).padStart(2, "0");
+      if (timerEl) timerEl.textContent = m + ":" + s;
+    }, 1000);
+  }
+
+  function stopProtocolTimer() {
+    if (state.protocolTimerInterval) {
+      clearInterval(state.protocolTimerInterval);
+      state.protocolTimerInterval = null;
+    }
+    if (state.abxCountdownInterval) {
+      clearInterval(state.abxCountdownInterval);
+      state.abxCountdownInterval = null;
+    }
+  }
+
+  // ── Antibiotic countdown (3-hour window from protocol start) ─────────────
+  function startAbxCountdown(steps) {
+    var hasAbxStep = steps.some(function (s, i) {
+      return /antibiotic|antimicrobial|abx/i.test(s.title + " " + s.body) && !state.stepCompletion[i];
+    });
+    var card = document.getElementById("abx-deadline-card");
+    if (!card) return;
+    if (!hasAbxStep) { card.classList.add("is-hidden"); return; }
+    card.classList.remove("is-hidden");
+
+    var THREE_HOURS = 3 * 60 * 60 * 1000;
+    if (state.abxCountdownInterval) clearInterval(state.abxCountdownInterval);
+    state.abxCountdownInterval = setInterval(function () {
+      var elapsed = Date.now() - (state.protocolStartTime || Date.now());
+      var remaining = Math.max(0, THREE_HOURS - elapsed);
+      var totalSec = Math.floor(remaining / 1000);
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = totalSec % 60;
+      var display = h + "h " + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
+      var el = document.getElementById("abx-countdown");
+      if (el) el.textContent = display;
+      if (remaining === 0) {
+        clearInterval(state.abxCountdownInterval);
+        if (el) el.textContent = "OVERDUE";
+        if (el) el.style.color = "#c53030";
+      }
+    }, 1000);
+  }
+
+  // ── Vitals bar ────────────────────────────────────────────────────────────
+  var VITAL_THRESHOLDS = {
+    hr:   { critical: [0, 50, 130, 999], warning: [50, 60, 110, 130] },
+    bp:   { critical: [0, 70],            warning: [70, 90] },   // systolic
+    temp: { critical: [0, 95, 104.5, 999], warning: [95, 97.5, 101, 104.5] },
+    spo2: { critical: [0, 90],            warning: [90, 95] },
+  };
+
+  function vitalStatus(type, rawValue) {
+    var n = parseFloat(String(rawValue).replace(/[^\d.]/g, ""));
+    if (isNaN(n)) return "";
+    var t = VITAL_THRESHOLDS[type];
+    if (!t) return "";
+    if (type === "hr" || type === "temp") {
+      if (n < t.critical[1] || n > t.critical[2]) return "critical";
+      if (n < t.warning[1] || n > t.warning[2]) return "warning";
+      return "normal";
+    }
+    // bp and spo2: critical below threshold, warning in middle
+    if (n < t.critical[1]) return "critical";
+    if (n < t.warning[1])  return "warning";
+    return "normal";
+  }
+
+  function updateVitalsBar(patient) {
+    var fields = [
+      { id: "bar-hr",   value: patient.heartRate,    type: "hr" },
+      { id: "bar-bp",   value: patient.bloodPressure, type: "bp" },
+      { id: "bar-temp", value: patient.temperature,   type: "temp" },
+      { id: "bar-spo2", value: patient.oxygen,        type: "spo2" },
+    ];
+    fields.forEach(function (f) {
+      var el = document.getElementById(f.id);
+      if (!el) return;
+      var display = (f.value && f.value !== "N/A") ? f.value : "—";
+      el.textContent = display;
+      el.className = "vitals-bar__value";
+      if (display !== "—") {
+        var status = vitalStatus(f.type, f.value);
+        if (status) el.classList.add("vitals-bar__value--" + status);
+      }
+    });
+    // Set urgency banner protocol name
+    var nameEl = document.getElementById("urgency-protocol-name");
+    if (nameEl) nameEl.textContent = (state.selectedProtocol || "PROTOCOL").toUpperCase() + " ACTIVE";
+  }
+
+  // ── Step sub-actions ──────────────────────────────────────────────────────
+  var STEP_SUB_ACTIONS = [
+    { pattern: /lactate|lactic acid/i,            actions: ["Order lab", "Receive result"] },
+    { pattern: /blood culture|culture/i,           actions: ["Collect sample", "Sent to lab"] },
+    { pattern: /antibiotic|antimicrobial|abx/i,    actions: ["Order", "Administer"] },
+    { pattern: /fluid|bolus|resuscitat/i,          actions: ["Order bolus", "Running"] },
+    { pattern: /iv access|vascular access|access/i, actions: ["Establish IV"] },
+    { pattern: /oxygen|o2|supplemental/i,          actions: ["Apply O2", "Confirm SpO2 improving"] },
+    { pattern: /picu|icu|escalat/i,                actions: ["Page team", "Team en route"] },
+    { pattern: /vasopressor|norepinephrine|epi/i,  actions: ["Order", "Infusing"] },
+  ];
+
+  function getSubActions(stepTitle, stepBody) {
+    var text = (stepTitle + " " + stepBody).toLowerCase();
+    for (var i = 0; i < STEP_SUB_ACTIONS.length; i++) {
+      if (STEP_SUB_ACTIONS[i].pattern.test(text)) return STEP_SUB_ACTIONS[i].actions;
+    }
+    return ["Done"];
+  }
+
+  // ── Team assignments ──────────────────────────────────────────────────────
+  var TEAM_ROLES = ["Attending", "Resident", "Nurse 1", "Nurse 2"];
+
+  function renderTeamGrid(steps) {
+    var grid = document.getElementById("team-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    TEAM_ROLES.forEach(function (role, i) {
+      var assignedIndex = state.teamAssignments.indexOf(i);
+      var member = document.createElement("div");
+      member.className = "team-member" + (assignedIndex !== -1 ? " team-member--active" : "");
+      var roleEl = document.createElement("span");
+      roleEl.className = "team-member__role";
+      roleEl.textContent = role;
+      var taskEl = document.createElement("span");
+      taskEl.className = "team-member__task";
+      if (assignedIndex !== -1 && steps[assignedIndex]) {
+        taskEl.textContent = steps[assignedIndex].title;
+      } else {
+        taskEl.textContent = "Ready";
+        taskEl.style.color = "var(--muted)";
+        taskEl.style.fontWeight = "400";
+      }
+      member.appendChild(roleEl);
+      member.appendChild(taskEl);
+      grid.appendChild(member);
+    });
   }
 
   function getLastMatch(text, pattern) {
@@ -1377,11 +1552,6 @@
     });
   });
 
-  document.querySelectorAll("[data-open-menu]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      navigateTo("menu");
-    });
-  });
 
   document.querySelectorAll("[data-back-button]").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -1390,8 +1560,116 @@
   });
 
   document.getElementById("open-menu-button").addEventListener("click", function () {
-    navigateTo("menu");
+    navigateTo("profile");
   });
+
+  // ── Home dashboard ────────────────────────────────────────────────────────
+  // Live clock
+  function startHomeClock() {
+    var clockEl = document.getElementById("home-live-clock");
+    function tick() {
+      if (clockEl) {
+        var now = new Date();
+        clockEl.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+  startHomeClock();
+
+
+  // Populate home vitals from last patient record
+  function refreshHomeDashboard() {
+    // Find most recent protocol with patient data
+    var latestProtocol = null;
+    var latestPatient = null;
+    Object.keys(state.protocolData).forEach(function (name) {
+      var record = state.protocolData[name];
+      if (record.patient && record.patient.heartRate && record.patient.heartRate !== "N/A") {
+        latestProtocol = name;
+        latestPatient = record.patient;
+      }
+    });
+
+    if (latestPatient) {
+      var vitals = [
+        { id: "home-hr",   labelId: "home-hr-label",   value: latestPatient.heartRate,    type: "hr" },
+        { id: "home-bp",   labelId: "home-bp-label",   value: latestPatient.bloodPressure, type: "bp" },
+        { id: "home-temp", labelId: "home-temp-label", value: latestPatient.temperature,   type: "temp" },
+        { id: "home-spo2", labelId: "home-spo2-label", value: latestPatient.oxygen,        type: "spo2" },
+      ];
+      var VITAL_LABELS = {
+        hr:   function (s) { return s === "critical" ? "High" : s === "warning" ? "Elevated" : "Normal"; },
+        bp:   function (s) { return s === "critical" ? "Low"  : s === "warning" ? "Low"      : "Normal"; },
+        temp: function (s) { return s === "critical" ? "Fever" : s === "warning" ? "Fever"   : "Normal"; },
+        spo2: function (s) { return s === "critical" ? "Low"  : s === "warning" ? "Low"      : "Normal"; },
+      };
+      vitals.forEach(function (v) {
+        var el = document.getElementById(v.id);
+        var lbl = document.getElementById(v.labelId);
+        if (!el) return;
+        var raw = v.value && v.value !== "N/A" ? v.value : "";
+        var display = raw ? raw.replace(/[^0-9./]/g, "").trim() || "—" : "—";
+        el.textContent = display;
+        if (lbl && display !== "—") {
+          var status = vitalStatus(v.type, v.value);
+          lbl.textContent = VITAL_LABELS[v.type] ? VITAL_LABELS[v.type](status) : "";
+          lbl.className = "hv-label" + (status ? " hv-label--" + status : "");
+        }
+      });
+    }
+
+    // Active case card — always visible
+    var caseTitleEl  = document.getElementById("home-case-title");
+    var caseMetaEl   = document.getElementById("home-case-meta");
+    var caseBadgeEl  = document.getElementById("home-case-badge");
+    var continueBtn  = document.getElementById("home-continue-button");
+    if (latestProtocol) {
+      var completed = state.stepCompletion.filter(Boolean).length;
+      var total     = state.stepCompletion.length;
+      if (caseTitleEl) caseTitleEl.textContent = "Probable " + latestProtocol;
+      if (caseMetaEl)  caseMetaEl.textContent  = total > 0
+        ? completed + " of " + total + " steps completed · Tap to resume"
+        : "Vitals captured — tap to start steps";
+      if (caseBadgeEl) caseBadgeEl.textContent = latestProtocol === "Septic Shock" ? "Critical" : "Active";
+      if (continueBtn) continueBtn.style.display = "";
+    } else {
+      if (caseTitleEl) caseTitleEl.textContent = "No active case";
+      if (caseMetaEl)  caseMetaEl.textContent  = "Select an emergency below to begin";
+      if (caseBadgeEl) caseBadgeEl.textContent = "";
+      if (continueBtn) continueBtn.style.display = "none";
+    }
+  }
+  refreshHomeDashboard();
+
+  // Home — Continue button
+  document.getElementById("home-continue-button").addEventListener("click", function () {
+    navigateTo("steps");
+  });
+
+
+  // Home — Quick emergency cards
+  document.querySelectorAll(".home-emg-card[data-protocol]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var protocol = btn.dataset.protocol;
+      state.selectedProtocol = protocol;
+      navigateTo("vitals");
+    });
+  });
+
+  // Home — Tool cards
+  document.querySelectorAll(".home-tool-card[data-screen-target]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      navigateTo(btn.dataset.screenTarget);
+    });
+  });
+
+  // Home — View All
+  document.querySelector(".home-view-all[data-screen-target]")?.addEventListener("click", function (e) {
+    navigateTo(e.currentTarget.dataset.screenTarget);
+  });
+
 
   document.getElementById("confirm-vitals-button").addEventListener("click", function () {
     const record = getProtocolRecord(state.selectedProtocol);
@@ -1426,6 +1704,7 @@
         var protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
         var preCompleted = detectCompletedSteps(patient, llmSteps);
         console.log("[Steps] Pre-completed:", preCompleted);
+        _currentStepsRef = llmSteps;
         renderStepsFromData(protocol.title, "Immediate - within 3 hours", llmSteps, preCompleted);
       } else {
         console.warn("[Steps] Could not parse LLM steps — falling back to hardcoded.");
@@ -1512,33 +1791,240 @@
     }
   });
 
-  calculateButton.addEventListener("click", function () {
-    const enteredWeight = Number(weightInput.value || 0);
-    const bolus = Number(bolusInput.value || 0);
-    const weightKg = unitSystemSelect.value === "metric" ? enteredWeight : poundsToKilograms(enteredWeight);
-    const total = weightKg * bolus;
-    const weightLabel = unitSystemSelect.value === "metric"
-      ? formatNumber(enteredWeight) + " kg"
-      : formatNumber(enteredWeight) + " lb";
-    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL for " + weightLabel + " at " + bolus.toFixed(0) + " mL/kg";
+  // ── Dosing Calculator ────────────────────────────────────────────────────
+  (function () {
+    var calcCondition = "sepsis";
+
+    function calcWeightKg() {
+      var raw = parseFloat(document.getElementById("calc-weight").value) || 0;
+      var unit = document.getElementById("calc-weight-unit").value;
+      return unit === "lb" ? raw * 0.453592 : raw;
+    }
+
+    function resetResults() {
+      var resultCard  = document.getElementById("calc-result-card");
+      var pressorCard = document.getElementById("calc-pressor-card");
+      var cardiacDiv  = document.getElementById("calc-results-cardiac");
+      if (resultCard)  resultCard.classList.add("is-hidden");
+      if (pressorCard) pressorCard.classList.add("is-hidden");
+      if (cardiacDiv)  cardiacDiv.classList.add("is-hidden");
+    }
+
+    function doCalculate() {
+      var wKg = calcWeightKg();
+      if (wKg <= 0) return;
+
+      resetResults();
+
+      if (calcCondition === "cardiac-arrest") {
+        var epiEl    = document.getElementById("calc-epi-value");
+        var epiSub   = document.getElementById("calc-epi-sub");
+        var defibEl  = document.getElementById("calc-defib-value");
+        var defibSub = document.getElementById("calc-defib-sub");
+        var cardiacDiv = document.getElementById("calc-results-cardiac");
+
+        var epiDose = (wKg * 0.01).toFixed(2);
+        var epiVol  = ((wKg * 0.01) / 0.1).toFixed(1);
+        var defib1  = Math.round(wKg * 2);
+        var defib2  = Math.round(wKg * 4);
+
+        if (epiEl)    epiEl.textContent    = "Epinephrine: " + epiDose + " mg (" + epiVol + " mL of 0.1 mg/mL)";
+        if (epiSub)   epiSub.textContent   = "Every 3–5 min during arrest";
+        if (defibEl)  defibEl.textContent  = "Defibrillation: " + defib1 + " J → " + defib2 + " J";
+        if (defibSub) defibSub.textContent = "Initial " + defib1 + " J · Subsequent " + defib2 + " J";
+        if (cardiacDiv) cardiacDiv.classList.remove("is-hidden");
+      } else {
+        var dose    = parseFloat(document.getElementById("calc-dose-input").value) || 20;
+        var vol     = Math.round(wKg * dose);
+        var fluidEl = document.getElementById("calc-fluid-value");
+        var resultCard  = document.getElementById("calc-result-card");
+        var pressorCard = document.getElementById("calc-pressor-card");
+
+        if (fluidEl)   fluidEl.textContent = "Recommended bolus: " + vol + " mL";
+        if (resultCard) resultCard.classList.remove("is-hidden");
+        if (pressorCard) pressorCard.classList.toggle("is-hidden", calcCondition !== "septic-shock");
+      }
+    }
+
+    function switchCondition(cond) {
+      calcCondition = cond;
+      document.querySelectorAll(".calc-cond-btn").forEach(function (b) {
+        b.classList.toggle("calc-cond-btn--active", b.dataset.condition === cond);
+      });
+      var doseField = document.getElementById("calc-dose-field");
+      if (doseField) doseField.classList.toggle("is-hidden", cond === "cardiac-arrest");
+      resetResults();
+    }
+
+    // Condition buttons
+    document.querySelectorAll(".calc-cond-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () { switchCondition(btn.dataset.condition); });
+    });
+
+    // Calculate button
+    document.getElementById("calc-calculate-btn").addEventListener("click", doCalculate);
+
+    // Auto-select condition from active protocol when navigating to calculator
+    document.getElementById("screen-calculator").addEventListener("calc-enter", function () {
+      if (state.selectedProtocol) {
+        var p = state.selectedProtocol.toLowerCase();
+        if (p.includes("cardiac")) switchCondition("cardiac-arrest");
+        else if (p.includes("shock")) switchCondition("septic-shock");
+        else switchCondition("sepsis");
+      }
+      var rec = state.selectedProtocol && state.protocolData[state.selectedProtocol];
+      if (rec && rec.patient && rec.patient.weight) {
+        document.getElementById("calc-weight").value = rec.patient.weight;
+      }
+      resetResults();
+    });
+
+    switchCondition("sepsis");
+
+    // Standalone handheld calculator
+    (function () {
+      var display = document.getElementById("hh-display");
+      var current = "0", stored = null, op = null, fresh = false;
+
+      function show(val) {
+        var s = String(val);
+        if (s.length > 12) s = parseFloat(parseFloat(s).toPrecision(10)).toString();
+        display.textContent = s;
+      }
+
+      document.querySelectorAll(".hh-key").forEach(function (key) {
+        key.addEventListener("click", function () {
+          var k = key.dataset.hh;
+
+          if (k === "clear") {
+            current = "0"; stored = null; op = null; fresh = false; show("0"); return;
+          }
+          if (k === "sign") {
+            current = String(parseFloat(current) * -1); show(current); return;
+          }
+          if (k === "percent") {
+            current = String(parseFloat(current) / 100); show(current); return;
+          }
+          if (k === "+" || k === "-" || k === "*" || k === "/") {
+            stored = parseFloat(current); op = k; fresh = true; return;
+          }
+          if (k === "=") {
+            if (op === null || stored === null) return;
+            var a = stored, b = parseFloat(current), res;
+            if (op === "+") res = a + b;
+            else if (op === "-") res = a - b;
+            else if (op === "*") res = a * b;
+            else if (op === "/") res = b !== 0 ? a / b : "Error";
+            current = String(res); op = null; stored = null; fresh = false; show(current); return;
+          }
+          if (k === ".") {
+            if (fresh) { current = "0."; fresh = false; show(current); return; }
+            if (!current.includes(".")) current += ".";
+            show(current); return;
+          }
+          if (fresh) { current = k; fresh = false; }
+          else current = current === "0" ? k : current + k;
+          show(current);
+        });
+      });
+    }());
+  }());
+
+  // ── Notes ────────────────────────────────────────────────────────────────
+  (function () {
+    var notes = JSON.parse(localStorage.getItem("vc_notes") || "[]");
+    var editingId = null;
+
+    function saveToStorage() { localStorage.setItem("vc_notes", JSON.stringify(notes)); }
+
+    function renderNotes() {
+      var list  = document.getElementById("notes-list");
+      var empty = document.getElementById("notes-empty");
+      var cards = list.querySelectorAll(".note-card");
+      cards.forEach(function (c) { c.remove(); });
+      if (notes.length === 0) { empty.classList.remove("is-hidden"); return; }
+      empty.classList.add("is-hidden");
+      notes.slice().reverse().forEach(function (n) {
+        var card = document.createElement("div");
+        card.className = "note-card";
+        card.innerHTML =
+          '<button class="note-card__delete" data-id="' + n.id + '" aria-label="Delete note"><i class="fa-solid fa-trash"></i></button>' +
+          '<div class="note-card__title">' + (n.title || "Untitled") + "</div>" +
+          '<div class="note-card__preview">' + (n.body || "") + "</div>" +
+          '<div class="note-card__date">' + new Date(n.updatedAt).toLocaleDateString() + "</div>";
+        card.querySelector(".note-card__delete").addEventListener("click", function (e) {
+          e.stopPropagation();
+          notes = notes.filter(function (x) { return x.id !== n.id; });
+          saveToStorage(); renderNotes();
+        });
+        card.addEventListener("click", function () { openEditor(n); });
+        list.appendChild(card);
+      });
+    }
+
+    function openEditor(note) {
+      editingId = note ? note.id : null;
+      document.getElementById("notes-editor-title").value = note ? note.title : "";
+      document.getElementById("notes-editor-body").value  = note ? note.body  : "";
+      document.getElementById("notes-list").classList.add("is-hidden");
+      document.getElementById("notes-add-btn").classList.add("is-hidden");
+      document.getElementById("notes-editor").classList.remove("is-hidden");
+    }
+
+    function closeEditor() {
+      document.getElementById("notes-editor").classList.add("is-hidden");
+      document.getElementById("notes-list").classList.remove("is-hidden");
+      document.getElementById("notes-add-btn").classList.remove("is-hidden");
+      editingId = null;
+    }
+
+    document.getElementById("notes-add-btn").addEventListener("click", function () { openEditor(null); });
+
+    document.getElementById("notes-save-btn").addEventListener("click", function () {
+      var title = document.getElementById("notes-editor-title").value.trim();
+      var body  = document.getElementById("notes-editor-body").value.trim();
+      if (!title && !body) { closeEditor(); return; }
+      if (editingId) {
+        var n = notes.find(function (x) { return x.id === editingId; });
+        if (n) { n.title = title; n.body = body; n.updatedAt = Date.now(); }
+      } else {
+        notes.push({ id: Date.now().toString(), title: title, body: body, updatedAt: Date.now() });
+      }
+      saveToStorage(); renderNotes(); closeEditor();
+    });
+
+    document.getElementById("notes-cancel-btn").addEventListener("click", closeEditor);
+
+    renderNotes();
+  }());
+
+  // Profile save
+  document.getElementById("profile-save-btn").addEventListener("click", function () {
+    var name = document.getElementById("profile-name-input").value.trim();
+    var role = document.getElementById("profile-role-input").value.trim();
+    var nameDisplay = document.getElementById("profile-name-display");
+    var roleDisplay = document.getElementById("profile-role-display");
+    if (nameDisplay && name) nameDisplay.textContent = name;
+    if (roleDisplay && role) roleDisplay.textContent = role;
+    try { localStorage.setItem("vitalcare_profile", JSON.stringify({ name: name, role: role,
+      institution: document.getElementById("profile-institution-input").value.trim(),
+      license: document.getElementById("profile-license-input").value.trim() })); } catch(e) {}
+    navigateTo("home");
   });
 
-  document.querySelectorAll("[data-calc-value]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      appendToCalculator(button.dataset.calcValue);
-    });
-  });
-
-  document.querySelectorAll("[data-calc-action]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      if (button.dataset.calcAction === "clear") {
-        clearCalculator();
-      }
-      if (button.dataset.calcAction === "equals") {
-        evaluateCalculator();
-      }
-    });
-  });
+  // Restore saved profile
+  (function () {
+    try {
+      var saved = JSON.parse(localStorage.getItem("vitalcare_profile") || "null");
+      if (!saved) return;
+      if (saved.name) { document.getElementById("profile-name-input").value = saved.name;
+        document.getElementById("profile-name-display").textContent = saved.name; }
+      if (saved.role) { document.getElementById("profile-role-input").value = saved.role;
+        document.getElementById("profile-role-display").textContent = saved.role; }
+      if (saved.institution) document.getElementById("profile-institution-input").value = saved.institution;
+      if (saved.license) document.getElementById("profile-license-input").value = saved.license;
+    } catch(e) {}
+  }());
 
   textSizeSlider.addEventListener("input", function (event) {
     applyTextScale(Number(event.target.value));

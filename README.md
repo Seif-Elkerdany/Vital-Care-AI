@@ -117,11 +117,7 @@ python main.py --gemini-api-key "<your key>" --gemini-model gemini-2.5-flash
 OpenAI-compatible path:
 
 ```bash
-python main.py \
-  --llm-backend openai \
-  --llm-base-url "https://llm-api.arc.vt.edu/api/v1" \
-  --llm-api-key "<your key>" \
-  --llm-model "gpt-oss-120b"
+python main.py --llm-backend openai --llm-base-url "https://llm-api.arc.vt.edu/api/v1" --llm-api-key "<your key>" --llm-model "gpt-oss-120b"
 ```
 
 Disable LLM chaining:
