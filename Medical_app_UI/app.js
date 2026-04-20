@@ -1654,6 +1654,11 @@
     btn.addEventListener("click", function () {
       var protocol = btn.dataset.protocol;
       state.selectedProtocol = protocol;
+      if (protocol === "Cardiac Arrest") {
+        renderSteps();
+        navigateTo("steps");
+        return;
+      }
       navigateTo("vitals");
     });
   });
