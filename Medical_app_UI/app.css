@@ -132,12 +132,13 @@ figure {
   min-height: calc(100% - 30px);
   max-height: calc(100% - 30px);
   overflow-y: auto;
-  padding: 16px 22px calc(96px + env(safe-area-inset-bottom, 0px));
+  padding: 16px 22px calc(88px + env(safe-area-inset-bottom, 0px));
   scrollbar-width: thin;
 }
 
 .screen--active {
-  display: block;
+  display: flex;
+  flex-direction: column;
 }
 
 .screen-header {
@@ -1656,7 +1657,7 @@ body.theme-dark .team-member--active {
    HOME DASHBOARD
 ═══════════════════════════════════════════ */
 #screen-home.screen--active {
-  padding: 14px 16px 20px;
+  padding: 14px 16px calc(88px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2057,11 +2058,15 @@ body.theme-dark .team-member--active {
   display: none;
 }
 
-.home-copyright {
+.screen-copyright {
   text-align: center;
   font-size: 11px;
   color: var(--muted);
-  margin-top: 4px;
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 28px;
+  padding-bottom: 0;
 }
 
 /* ═══════════════════════════════════════════
