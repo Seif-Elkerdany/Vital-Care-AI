@@ -90,6 +90,8 @@ GEMINI_MODEL=gemini-2.5-flash
 
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=medical_documents
+RAG_GUIDELINE_UPLOAD_DIR=data/guidelines
+RAG_GUIDELINE_STALE_MONTHS=24
 
 TTS_VOICE=af_heart
 TTS_LANG_CODE=a
@@ -161,6 +163,8 @@ Useful STT endpoints:
 - `GET /transcriptions/latest`
 - `GET /transcriptions`
 - `POST /pipeline/text`
+- `POST /admin/guidelines/upload`
+- `GET /admin/guidelines`
 
 Example:
 

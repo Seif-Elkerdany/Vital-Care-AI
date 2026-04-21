@@ -17,3 +17,5 @@ class RAGConfig:
     chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "600"))
     chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "120"))
     top_k: int = int(os.getenv("RAG_TOP_K", "5"))
+    guideline_upload_dir: str = os.getenv("RAG_GUIDELINE_UPLOAD_DIR", "data/guidelines")
+    guideline_stale_months: int = int(os.getenv("RAG_GUIDELINE_STALE_MONTHS", "24"))

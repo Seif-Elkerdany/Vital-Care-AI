@@ -21,6 +21,24 @@ Main files:
 
 This module provides retrieval results to `backend_api.LLM` and is instantiated by the backend bootstrap wiring.
 
+## Managed Guideline Lifecycle
+
+The backend now supports a single managed guideline stream with:
+- monotonic `protocol_version` assignment
+- soft deletion of the previously active guideline when a new one is approved
+- stale-guideline alerts based on upload age
+
+Relevant settings:
+
+```env
+RAG_GUIDELINE_UPLOAD_DIR=data/guidelines
+RAG_GUIDELINE_STALE_MONTHS=24
+```
+
+Admin API endpoints on the main FastAPI app:
+- `POST /admin/guidelines/upload`
+- `GET /admin/guidelines?include_deleted=false`
+
 ## How To Upload A Document
 
 In this module, "upload" means adding a PDF document into the RAG index so it can be retrieved later.
@@ -102,6 +120,12 @@ List indexed documents:
 
 ```bash
 python -m backend_api.RAG.cli list
+```
+
+List indexed documents including soft-deleted managed guidelines:
+
+```bash
+python -m backend_api.RAG.cli list --include-deleted
 ```
 
 Search indexed content:

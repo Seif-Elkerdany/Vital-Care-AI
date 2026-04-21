@@ -38,6 +38,9 @@ class QdrantRAGStore:
             ("document_name", models.PayloadSchemaType.KEYWORD),
             ("file_hash", models.PayloadSchemaType.KEYWORD),
             ("page_number", models.PayloadSchemaType.INTEGER),
+            ("is_deleted", models.PayloadSchemaType.BOOL),
+            ("protocol_version", models.PayloadSchemaType.INTEGER),
+            ("uploaded_at", models.PayloadSchemaType.DATETIME),
         ):
             try:
                 self.client.create_payload_index(
@@ -55,6 +58,7 @@ class QdrantRAGStore:
         document: PDFDocument,
         page_chunks: list[PageChunk],
         vectors: list[list[float]],
+        lifecycle_payload: dict[str, Any] | None = None,
     ) -> int:
         models = self.models
         if len(page_chunks) != len(vectors):
@@ -89,6 +93,14 @@ class QdrantRAGStore:
                 "chunk_id": f"{document.document_id}:{chunk_index}",
                 "text": chunk.text,
             }
+            if lifecycle_payload:
+                payload.update(
+                    {
+                        key: value
+                        for key, value in lifecycle_payload.items()
+                        if value is not None or key == "is_deleted"
+                    }
+                )
             points.append(models.PointStruct(id=point_id, vector=vector, payload=payload))
 
         if points:
@@ -128,10 +140,37 @@ class QdrantRAGStore:
             ),
         )
 
-    def query(self, query_vector: list[float], limit: int) -> list[dict[str, Any]]:
+    def soft_delete_documents(
+        self,
+        document_ids: list[str],
+        *,
+        deleted_at: str,
+        superseded_by_document_id: str,
+    ) -> None:
+        if not document_ids:
+            return
+
+        self.client.set_payload(
+            collection_name=self.collection_name,
+            payload={
+                "is_deleted": True,
+                "deleted_at": deleted_at,
+                "superseded_by_document_id": superseded_by_document_id,
+            },
+            points=self._document_ids_filter(document_ids),
+        )
+
+    def query(
+        self,
+        query_vector: list[float],
+        limit: int,
+        *,
+        include_deleted: bool = False,
+    ) -> list[dict[str, Any]]:
         response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
+            query_filter=None if include_deleted else self._active_documents_filter(),
             limit=limit,
             with_payload=True,
         )
@@ -149,13 +188,14 @@ class QdrantRAGStore:
             )
         return hits
 
-    def list_documents(self) -> list[dict[str, Any]]:
+    def list_documents(self, *, include_deleted: bool = True) -> list[dict[str, Any]]:
         documents: dict[str, dict[str, Any]] = defaultdict(dict)
         next_offset = None
 
         while True:
             points, next_offset = self.client.scroll(
                 collection_name=self.collection_name,
+                scroll_filter=None if include_deleted else self._active_documents_filter(),
                 with_payload=True,
                 with_vectors=False,
                 limit=256,
@@ -177,6 +217,11 @@ class QdrantRAGStore:
                     "file_size": payload.get("file_size"),
                     "total_pages": payload.get("total_pages"),
                     "total_chunks": payload.get("total_chunks"),
+                    "protocol_version": payload.get("protocol_version"),
+                    "uploaded_at": payload.get("uploaded_at"),
+                    "is_deleted": payload.get("is_deleted", False),
+                    "deleted_at": payload.get("deleted_at"),
+                    "superseded_by_document_id": payload.get("superseded_by_document_id"),
                 }
 
             if next_offset is None:
@@ -189,3 +234,27 @@ class QdrantRAGStore:
                 str(item.get("document_id", "")).lower(),
             ),
         )
+
+    def _active_documents_filter(self):
+        models = self.models
+        return models.Filter(
+            must_not=[
+                models.FieldCondition(
+                    key="is_deleted",
+                    match=models.MatchValue(value=True),
+                )
+            ]
+        )
+
+    def _document_ids_filter(self, document_ids: list[str]):
+        models = self.models
+        conditions = [
+            models.FieldCondition(
+                key="document_id",
+                match=models.MatchValue(value=document_id),
+            )
+            for document_id in document_ids
+        ]
+        if len(conditions) == 1:
+            return models.Filter(must=conditions)
+        return models.Filter(should=conditions)

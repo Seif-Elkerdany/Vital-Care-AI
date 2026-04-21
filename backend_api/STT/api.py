@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from .schemas import (
+    GuidelineListResponse,
+    GuidelineUploadResponse,
     HealthResponse,
     LLMResponseResult,
     RecordingStatusResponse,
@@ -15,7 +17,7 @@ from .schemas import (
 )
 
 
-def create_app(stt_service):
+def create_app(stt_service, rag_service=None):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
@@ -26,6 +28,11 @@ def create_app(stt_service):
             stt_service.stop_hotkey_listener()
 
     app = FastAPI(title="MedAPP STT API", version="1.0.0", lifespan=lifespan)
+    resolved_rag_service = (
+        rag_service
+        or getattr(stt_service, "rag_service", None)
+        or getattr(getattr(stt_service, "pipeline_engine", None), "rag_service", None)
+    )
 
     def require_latest_transcription() -> TranscriptionResult:
         latest = stt_service.latest()
@@ -41,6 +48,14 @@ def create_app(stt_service):
                 detail="LLM response is not available for latest transcription.",
             )
         return latest
+
+    def require_rag_service():
+        if resolved_rag_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="RAG service is not available.",
+            )
+        return resolved_rag_service
 
     @app.get("/health", response_model=HealthResponse)
     async def health():
@@ -101,5 +116,28 @@ def create_app(stt_service):
                 raise HTTPException(status_code=503, detail=latest.tts_error)
             raise HTTPException(status_code=404, detail="MP3 audio is not available for latest LLM response.")
         return Response(content=audio_mp3, media_type="audio/mpeg")
+
+    @app.post("/admin/guidelines/upload", response_model=GuidelineUploadResponse)
+    async def upload_guideline(file: UploadFile = File(...)):
+        rag = require_rag_service()
+        try:
+            payload = await file.read()
+            return rag.publish_guideline(
+                payload,
+                original_filename=file.filename or "guideline.pdf",
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        finally:
+            await file.close()
+
+    @app.get("/admin/guidelines", response_model=GuidelineListResponse)
+    async def list_guidelines(include_deleted: bool = Query(default=False)):
+        rag = require_rag_service()
+        return GuidelineListResponse(
+            items=rag.list_documents(include_deleted=include_deleted)
+        )
 
     return app

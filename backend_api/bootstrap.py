@@ -111,13 +111,25 @@ def parse_args():
 def build_service(args) -> SpeechToTextService:
     llm_engine = None
     pipeline_engine = None
+    rag_service = None
+
+    if AppConfig.rag_enabled and not args.disable_rag:
+        from backend_api.RAG import RAGService
+        from backend_api.RAG.config import RAGConfig
+
+        rag_config = RAGConfig()
+        try:
+            rag_service = RAGService()
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to initialize the RAG service "
+                f"(collection `{rag_config.collection_name}`, embedding model `{rag_config.embedding_model}`): {exc}"
+            ) from exc
 
     if AppConfig.llm_enabled and not args.disable_llm:
         from backend_api.LLM.gemini_flash import GeminiFlashClient
         from backend_api.LLM.llm_engine import LLMEngine
         from backend_api.LLM.pipeline import LLMRAGPipeline, OpenAICompatClient
-        from backend_api.RAG import RAGService
-        from backend_api.RAG.config import RAGConfig
 
         try:
             if args.llm_backend == "gemini":
@@ -136,17 +148,6 @@ def build_service(args) -> SpeechToTextService:
             raise RuntimeError(
                 f"Failed to initialize the `{args.llm_backend}` LLM backend: {exc}"
             ) from exc
-
-        rag_service = None
-        if AppConfig.rag_enabled and not args.disable_rag:
-            rag_config = RAGConfig()
-            try:
-                rag_service = RAGService()
-            except Exception as exc:
-                raise RuntimeError(
-                    "Failed to initialize the RAG service "
-                    f"(collection `{rag_config.collection_name}`, embedding model `{rag_config.embedding_model}`): {exc}"
-                ) from exc
 
         pipeline_engine = LLMRAGPipeline(
             llm_client=llm_client,
@@ -172,6 +173,7 @@ def build_service(args) -> SpeechToTextService:
         language=args.language,
         llm_engine=llm_engine,
         pipeline_engine=pipeline_engine,
+        rag_service=rag_service,
         tts_engine=tts_engine,
         tts_output_dir=args.tts_output_dir,
     )
@@ -182,7 +184,7 @@ def create_app(service: SpeechToTextService):
 
     from backend_api.STT.api import create_app as create_stt_app
 
-    app = create_stt_app(service)
+    app = create_stt_app(service, rag_service=getattr(service, "rag_service", None))
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

@@ -15,6 +15,7 @@ from .whisper_engine import WhisperEngine
 if TYPE_CHECKING:
     from backend_api.LLM.llm_engine import LLMEngine
     from backend_api.LLM.pipeline import LLMRAGPipeline
+    from backend_api.RAG.service import RAGService
     from backend_api.TTS.tts_engine import TTSEngine
 
 
@@ -25,6 +26,7 @@ class SpeechToTextService:
         language,
         llm_engine: Optional["LLMEngine"] = None,
         pipeline_engine: Optional["LLMRAGPipeline"] = None,
+        rag_service: Optional["RAGService"] = None,
         tts_engine: Optional["TTSEngine"] = None,
         tts_output_dir: Optional[str] = None,
         max_items: int = 100,
@@ -35,6 +37,7 @@ class SpeechToTextService:
         self.engine = engine or WhisperEngine(model_id=model_id, language=language)
         self.llm_engine = llm_engine
         self.pipeline_engine = pipeline_engine
+        self.rag_service = rag_service
         self.tts_engine = tts_engine
         self.tts_output_dir = Path(tts_output_dir).expanduser() if tts_output_dir else None
         self.recorder = recorder or AudioRecorder()

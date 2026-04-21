@@ -35,6 +35,7 @@ class BootstrapTests(unittest.TestCase):
             language="en",
             llm_engine=None,
             pipeline_engine=None,
+            rag_service=None,
             tts_engine=None,
             tts_output_dir="stt/output_audio",
         )
@@ -119,6 +120,43 @@ class BootstrapTests(unittest.TestCase):
                 r"Failed to initialize the RAG service \(collection `medical_documents`, embedding model `sentence-transformers/embeddinggemma-300m-medical`\): embedding model unavailable",
             ):
                 bootstrap.build_service(args)
+
+    def test_build_service_wires_rag_service_even_when_llm_is_disabled(self):
+        args = types.SimpleNamespace(
+            model="openai/whisper-medium",
+            language="en",
+            disable_llm=True,
+            disable_tts=True,
+            disable_rag=False,
+            llm_backend="gemini",
+            llm_model="gpt-oss-120b",
+            llm_base_url="https://llm-api.arc.vt.edu/api/v1",
+            llm_api_key=None,
+            gemini_model="gemini-2.5-flash",
+            gemini_api_key=None,
+            pipeline_top_k=None,
+            tts_voice="af_heart",
+            tts_lang_code="a",
+            tts_sample_rate=24000,
+            tts_output_dir="stt/output_audio",
+        )
+
+        with patch("backend_api.RAG.RAGService", return_value="rag-service") as rag_cls, patch(
+            "backend_api.bootstrap.SpeechToTextService",
+            autospec=True,
+        ) as service_cls:
+            bootstrap.build_service(args)
+
+        rag_cls.assert_called_once_with()
+        service_cls.assert_called_once_with(
+            model_id="openai/whisper-medium",
+            language="en",
+            llm_engine=None,
+            pipeline_engine=None,
+            rag_service="rag-service",
+            tts_engine=None,
+            tts_output_dir="stt/output_audio",
+        )
 
 
 if __name__ == "__main__":
