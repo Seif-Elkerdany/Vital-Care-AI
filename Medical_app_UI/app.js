@@ -495,6 +495,11 @@
     Object.keys(screens).forEach(function (key) {
       screens[key].classList.toggle("screen--active", key === name);
     });
+    document.querySelectorAll(".bottom-nav__btn[data-screen-target]").forEach(function (button) {
+      const isActive = button.dataset.screenTarget === name;
+      button.classList.toggle("bottom-nav__btn--active", isActive);
+      button.setAttribute("aria-current", isActive ? "page" : "false");
+    });
     state.currentScreen = name;
     if (screens[name]) {
       screens[name].scrollTop = 0;

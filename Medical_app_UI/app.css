@@ -2539,8 +2539,9 @@ body.theme-dark .team-member--active {
 .bottom-nav {
   position: sticky;
   bottom: 0;
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, var(--surface) 100%);
   border-top: 1px solid var(--soft-line);
+  box-shadow: 0 -8px 18px rgba(72, 133, 186, 0.08);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2563,7 +2564,7 @@ body.theme-dark .team-member--active {
   font-weight: 600;
   letter-spacing: 0.04em;
   border-radius: 12px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .bottom-nav__btn i {
@@ -2574,4 +2575,17 @@ body.theme-dark .team-member--active {
 .bottom-nav__btn--active {
   color: #2b6cb0;
   background: var(--surface-alt);
+}
+
+.bottom-nav__btn--active {
+  box-shadow: inset 0 0 0 1px rgba(43, 108, 176, 0.16), 0 4px 10px rgba(72, 133, 186, 0.12);
+}
+
+body.theme-dark .bottom-nav {
+  background: linear-gradient(180deg, rgba(33, 69, 98, 0.96) 0%, var(--surface) 100%);
+  box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.22);
+}
+
+body.theme-dark .bottom-nav__btn--active {
+  box-shadow: inset 0 0 0 1px rgba(189, 213, 233, 0.14), 0 4px 12px rgba(0, 0, 0, 0.22);
 }
