@@ -37,9 +37,11 @@ class QdrantRAGStore:
             ("document_id", models.PayloadSchemaType.KEYWORD),
             ("document_name", models.PayloadSchemaType.KEYWORD),
             ("file_hash", models.PayloadSchemaType.KEYWORD),
+            ("chunk_id", models.PayloadSchemaType.KEYWORD),
             ("page_number", models.PayloadSchemaType.INTEGER),
             ("is_deleted", models.PayloadSchemaType.BOOL),
             ("protocol_version", models.PayloadSchemaType.INTEGER),
+            ("status", models.PayloadSchemaType.KEYWORD),
             ("uploaded_at", models.PayloadSchemaType.DATETIME),
         ):
             try:
@@ -58,11 +60,14 @@ class QdrantRAGStore:
         document: PDFDocument,
         page_chunks: list[PageChunk],
         vectors: list[list[float]],
+        chunk_records: list[dict[str, Any]] | None = None,
         lifecycle_payload: dict[str, Any] | None = None,
     ) -> int:
         models = self.models
         if len(page_chunks) != len(vectors):
             raise ValueError("The number of chunks must match the number of vectors.")
+        if chunk_records is not None and len(chunk_records) != len(page_chunks):
+            raise ValueError("Chunk metadata must match the number of page chunks.")
 
         self.delete_document_by_id(document.document_id)
 
@@ -70,10 +75,15 @@ class QdrantRAGStore:
         points: list[models.PointStruct] = []
 
         for chunk_index, (chunk, vector) in enumerate(zip(page_chunks, vectors)):
-            point_id = str(
-                uuid5(
-                    NAMESPACE_URL,
-                    f"{document.document_id}:{chunk.page_number}:{chunk_index}",
+            chunk_record = chunk_records[chunk_index] if chunk_records is not None else None
+            point_id = (
+                str(chunk_record["id"])
+                if chunk_record is not None
+                else str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"{document.document_id}:{chunk.page_number}:{chunk_index}",
+                    )
                 )
             )
             payload = {
@@ -90,9 +100,17 @@ class QdrantRAGStore:
                 "chunk_index": chunk_index,
                 "chunk_index_in_page": chunk.chunk_index_in_page,
                 "section_label": chunk.section_label,
-                "chunk_id": f"{document.document_id}:{chunk_index}",
+                "chunk_id": point_id,
                 "text": chunk.text,
             }
+            if chunk_record is not None and chunk_record.get("metadata"):
+                payload.update(
+                    {
+                        key: value
+                        for key, value in chunk_record["metadata"].items()
+                        if key not in {"text", "content"}
+                    }
+                )
             if lifecycle_payload:
                 payload.update(
                     {
@@ -154,6 +172,7 @@ class QdrantRAGStore:
             collection_name=self.collection_name,
             payload={
                 "is_deleted": True,
+                "status": "archived",
                 "deleted_at": deleted_at,
                 "superseded_by_document_id": superseded_by_document_id,
             },

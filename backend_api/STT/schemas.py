@@ -60,8 +60,17 @@ class StepsResponse(BaseModel):
 class GuidelineDocumentResponse(BaseModel):
     document_id: str
     document_name: str
+    title: str | None = None
+    source_type: str | None = None
     source_path: str | None = None
+    file_url: str | None = None
     file_hash: str | None = None
+    version: str | None = None
+    status: str = "draft"
+    uploaded_by: str | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
+    created_at: datetime | None = None
     total_pages: int | None = None
     indexed_pages: int | None = None
     total_chunks: int | None = None

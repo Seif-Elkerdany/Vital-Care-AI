@@ -3,6 +3,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
+from backend_api.api.admin import build_admin_router
+from backend_api.api.auth import build_auth_router
+from backend_api.api.chat import build_chat_router
+
 from .schemas import (
     GuidelineListResponse,
     GuidelineUploadResponse,
@@ -17,7 +21,14 @@ from .schemas import (
 )
 
 
-def create_app(stt_service, rag_service=None):
+def create_app(
+    stt_service,
+    rag_service=None,
+    *,
+    auth_service=None,
+    chat_service=None,
+    invitation_service=None,
+):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
@@ -117,27 +128,36 @@ def create_app(stt_service, rag_service=None):
             raise HTTPException(status_code=404, detail="MP3 audio is not available for latest LLM response.")
         return Response(content=audio_mp3, media_type="audio/mpeg")
 
-    @app.post("/admin/guidelines/upload", response_model=GuidelineUploadResponse)
-    async def upload_guideline(file: UploadFile = File(...)):
-        rag = require_rag_service()
-        try:
-            payload = await file.read()
-            return rag.publish_guideline(
-                payload,
-                original_filename=file.filename or "guideline.pdf",
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        finally:
-            await file.close()
+    if auth_service is not None and invitation_service is not None:
+        app.include_router(build_auth_router(auth_service, invitation_service))
 
-    @app.get("/admin/guidelines", response_model=GuidelineListResponse)
-    async def list_guidelines(include_deleted: bool = Query(default=False)):
-        rag = require_rag_service()
-        return GuidelineListResponse(
-            items=rag.list_documents(include_deleted=include_deleted)
-        )
+    if auth_service is not None and chat_service is not None:
+        app.include_router(build_chat_router(auth_service, chat_service))
+
+    if auth_service is not None and invitation_service is not None:
+        app.include_router(build_admin_router(auth_service, invitation_service, resolved_rag_service))
+    else:
+        @app.post("/admin/guidelines/upload", response_model=GuidelineUploadResponse)
+        async def upload_guideline(file: UploadFile = File(...)):
+            rag = require_rag_service()
+            try:
+                payload = await file.read()
+                return rag.publish_guideline(
+                    payload,
+                    original_filename=file.filename or "guideline.pdf",
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            finally:
+                await file.close()
+
+        @app.get("/admin/guidelines", response_model=GuidelineListResponse)
+        async def list_guidelines(include_deleted: bool = Query(default=False)):
+            rag = require_rag_service()
+            return GuidelineListResponse(
+                items=rag.list_documents(include_deleted=include_deleted)
+            )
 
     return app

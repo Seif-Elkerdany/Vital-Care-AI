@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from backend_api.db import build_document_catalog, build_postgres_services
 from backend_api.STT import AppConfig, SpeechToTextService
 
 
@@ -112,6 +113,7 @@ def build_service(args) -> SpeechToTextService:
     llm_engine = None
     pipeline_engine = None
     rag_service = None
+    document_catalog = build_document_catalog()
 
     if AppConfig.rag_enabled and not args.disable_rag:
         from backend_api.RAG import RAGService
@@ -119,7 +121,11 @@ def build_service(args) -> SpeechToTextService:
 
         rag_config = RAGConfig()
         try:
-            rag_service = RAGService()
+            rag_service = (
+                RAGService(document_catalog=document_catalog)
+                if document_catalog is not None
+                else RAGService()
+            )
         except Exception as exc:
             raise RuntimeError(
                 "Failed to initialize the RAG service "
@@ -184,7 +190,17 @@ def create_app(service: SpeechToTextService):
 
     from backend_api.STT.api import create_app as create_stt_app
 
-    app = create_stt_app(service, rag_service=getattr(service, "rag_service", None))
+    postgres_services = build_postgres_services(
+        stt_service=service,
+        document_catalog=getattr(getattr(service, "rag_service", None), "document_catalog", None),
+    )
+    app = create_stt_app(
+        service,
+        rag_service=getattr(service, "rag_service", None),
+        auth_service=getattr(postgres_services, "auth_service", None),
+        chat_service=getattr(postgres_services, "chat_service", None),
+        invitation_service=getattr(postgres_services, "invitation_service", None),
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

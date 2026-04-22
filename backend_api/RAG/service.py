@@ -24,6 +24,7 @@ class RAGService:
         *,
         embedding_model: EmbeddingModel | None = None,
         store: QdrantRAGStore | None = None,
+        document_catalog=None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.config = config or RAGConfig()
@@ -32,6 +33,7 @@ class RAGService:
             url=self.config.qdrant_url,
             collection_name=self.config.collection_name,
         )
+        self.document_catalog = document_catalog
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self.store.ensure_collection(vector_size=self.embedding_model.dimension)
 
@@ -42,7 +44,15 @@ class RAGService:
             lifecycle_payload={"is_deleted": False},
         )
 
-    def publish_guideline(self, pdf_bytes: bytes, *, original_filename: str) -> dict[str, Any]:
+    def publish_guideline(
+        self,
+        pdf_bytes: bytes,
+        *,
+        original_filename: str,
+        uploaded_by: str | None = None,
+        approved_by: str | None = None,
+        auto_approve: bool = True,
+    ) -> dict[str, Any]:
         if not pdf_bytes:
             raise ValueError("Uploaded PDF must not be empty.")
 
@@ -50,7 +60,7 @@ class RAGService:
         if Path(normalized_name).suffix.lower() != ".pdf":
             raise ValueError("Only PDF uploads are supported.")
 
-        all_documents = self.store.list_documents(include_deleted=True)
+        all_documents = self._list_catalog_documents(include_deleted=True)
         active_documents = [doc for doc in all_documents if not self._document_is_deleted(doc)]
         legacy_active_documents = [
             doc for doc in active_documents if doc.get("protocol_version") in (None, "")
@@ -101,7 +111,15 @@ class RAGService:
                     "protocol_version": protocol_version,
                     "uploaded_at": uploaded_at,
                     "is_deleted": False,
+                    "status": "approved" if auto_approve else "pending_review",
                 },
+                source_type="guideline_pdf",
+                file_url=str(stored_path),
+                version=str(protocol_version),
+                status="approved" if auto_approve else "pending_review",
+                uploaded_by=uploaded_by,
+                approved_by=approved_by if auto_approve else None,
+                approved_at=uploaded_at_dt if auto_approve else None,
             )
         except Exception:
             if stored_path.exists():
@@ -114,6 +132,8 @@ class RAGService:
                 deleted_at=uploaded_at,
                 superseded_by_document_id=document.document_id,
             )
+            if self.document_catalog is not None:
+                self.document_catalog.archive_documents(active_document_ids)
 
         logger.info(
             "Approved guideline update document_id=%s protocol_version=%s uploaded_at=%s superseded_document_ids=%s",
@@ -127,6 +147,7 @@ class RAGService:
             **result,
             "protocol_version": protocol_version,
             "uploaded_at": uploaded_at,
+            "status": "approved" if auto_approve else "pending_review",
             "is_deleted": False,
             "deleted_at": None,
             "superseded_by_document_id": None,
@@ -145,24 +166,45 @@ class RAGService:
 
     def search(self, query: str, top_k: int | None = None) -> list[dict[str, Any]]:
         query_vector = self.embedding_model.embed_query(query)
-        return self.store.query(
+        hits = self.store.query(
             query_vector,
             limit=top_k or self.config.top_k,
             include_deleted=False,
         )
+        if self.document_catalog is None:
+            return hits
+
+        approved_document_ids = self.document_catalog.list_approved_document_ids()
+        if not approved_document_ids:
+            return []
+        return [
+            hit
+            for hit in hits
+            if str((hit.get("metadata") or {}).get("document_id")) in approved_document_ids
+        ]
 
     def list_documents(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         now = self._now_utc()
         return [
             self._decorate_document_record(document, reference_now=now)
-            for document in self.store.list_documents(include_deleted=include_deleted)
+            for document in self._list_catalog_documents(include_deleted=include_deleted)
         ]
+
+    def decorate_document_record(self, document: dict[str, Any]) -> dict[str, Any]:
+        return self._decorate_document_record(document, reference_now=self._now_utc())
 
     def _index_document(
         self,
         document,
         *,
         lifecycle_payload: dict[str, Any] | None = None,
+        source_type: str | None = None,
+        file_url: str | None = None,
+        version: str | None = None,
+        status: str = "approved",
+        uploaded_by: str | None = None,
+        approved_by: str | None = None,
+        approved_at: datetime | None = None,
     ) -> dict[str, Any]:
         page_chunks = chunk_pages(
             pages=document.pages,
@@ -174,13 +216,38 @@ class RAGService:
                 f"No extractable text was found in PDF: {document.document_name}"
             )
 
+        chunk_records = self._build_chunk_records(document=document, page_chunks=page_chunks)
         vectors = self.embedding_model.embed_documents([chunk.text for chunk in page_chunks])
-        chunk_count = self.store.upsert_document(
-            document=document,
-            page_chunks=page_chunks,
-            vectors=vectors,
-            lifecycle_payload=lifecycle_payload,
-        )
+        if self.document_catalog is not None:
+            self.document_catalog.sync_indexed_document(
+                document_id=document.document_id,
+                title=document.document_name,
+                source_type=source_type,
+                file_url=file_url or document.source_path,
+                version=version,
+                status=status,
+                uploaded_by=uploaded_by,
+                approved_by=approved_by,
+                approved_at=approved_at,
+                chunk_records=chunk_records,
+            )
+        try:
+            chunk_count = self.store.upsert_document(
+                document=document,
+                page_chunks=page_chunks,
+                vectors=vectors,
+                chunk_records=chunk_records,
+                lifecycle_payload=lifecycle_payload,
+            )
+        except TypeError as exc:
+            if "chunk_records" not in str(exc):
+                raise
+            chunk_count = self.store.upsert_document(
+                document=document,
+                page_chunks=page_chunks,
+                vectors=vectors,
+                lifecycle_payload=lifecycle_payload,
+            )
 
         return {
             "document_id": document.document_id,
@@ -190,6 +257,8 @@ class RAGService:
             "total_pages": document.total_pages,
             "indexed_pages": len(document.pages),
             "total_chunks": chunk_count,
+            "version": version,
+            "status": status,
         }
 
     def _next_protocol_version(
@@ -253,6 +322,33 @@ class RAGService:
         record["stale_threshold_months"] = self.config.guideline_stale_months
         record["notification_message"] = notification_message
         return record
+
+    def _build_chunk_records(self, *, document, page_chunks) -> list[dict[str, Any]]:
+        chunk_records: list[dict[str, Any]] = []
+        for chunk_index, chunk in enumerate(page_chunks):
+            chunk_id = str(uuid5(NAMESPACE_URL, f"{document.document_id}:chunk:{chunk_index}"))
+            chunk_records.append(
+                {
+                    "id": chunk_id,
+                    "chunk_index": chunk_index,
+                    "content": chunk.text,
+                    "metadata": {
+                        "document_id": document.document_id,
+                        "document_name": document.document_name,
+                        "source_path": document.source_path,
+                        "file_hash": document.file_hash,
+                        "page_number": chunk.page_number,
+                        "chunk_index_in_page": chunk.chunk_index_in_page,
+                        "section_label": chunk.section_label,
+                    },
+                }
+            )
+        return chunk_records
+
+    def _list_catalog_documents(self, *, include_deleted: bool) -> list[dict[str, Any]]:
+        if self.document_catalog is None:
+            return self.store.list_documents(include_deleted=include_deleted)
+        return self.document_catalog.list_documents(include_archived=include_deleted)
 
     def _document_is_deleted(self, document: dict[str, Any]) -> bool:
         value = document.get("is_deleted", False)

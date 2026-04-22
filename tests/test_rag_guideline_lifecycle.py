@@ -17,6 +17,11 @@ except Exception:
     TestClient = None
     create_stt_app = None
 
+try:
+    import multipart  # noqa: F401
+except Exception:
+    multipart = None
+
 
 class FakeEmbeddingModel:
     dimension = 3
@@ -395,7 +400,10 @@ class QdrantStoreLifecycleTests(unittest.TestCase):
         self.assertEqual(len(client.set_payload_kwargs["points"].should), 2)
 
 
-@unittest.skipIf(TestClient is None or create_stt_app is None, "FastAPI test client unavailable")
+@unittest.skipIf(
+    TestClient is None or create_stt_app is None or multipart is None,
+    "FastAPI test client or multipart dependency unavailable",
+)
 class GuidelineAdminApiTests(unittest.TestCase):
     class FakeSTTService:
         def start_hotkey_listener(self):

@@ -27,7 +27,10 @@ class BootstrapTests(unittest.TestCase):
             tts_output_dir="stt/output_audio",
         )
 
-        with patch("backend_api.bootstrap.SpeechToTextService", autospec=True) as service_cls:
+        with patch("backend_api.bootstrap.build_document_catalog", return_value=None), patch(
+            "backend_api.bootstrap.SpeechToTextService",
+            autospec=True,
+        ) as service_cls:
             bootstrap.build_service(args)
 
         service_cls.assert_called_once_with(
@@ -78,7 +81,7 @@ class BootstrapTests(unittest.TestCase):
             tts_output_dir="stt/output_audio",
         )
 
-        with patch(
+        with patch("backend_api.bootstrap.build_document_catalog", return_value=None), patch(
             "backend_api.LLM.gemini_flash.GeminiFlashClient",
             side_effect=RuntimeError("google-genai missing"),
         ):
@@ -108,7 +111,7 @@ class BootstrapTests(unittest.TestCase):
             tts_output_dir="stt/output_audio",
         )
 
-        with patch(
+        with patch("backend_api.bootstrap.build_document_catalog", return_value=None), patch(
             "backend_api.LLM.gemini_flash.GeminiFlashClient",
             return_value=object(),
         ), patch(
@@ -141,10 +144,10 @@ class BootstrapTests(unittest.TestCase):
             tts_output_dir="stt/output_audio",
         )
 
-        with patch("backend_api.RAG.RAGService", return_value="rag-service") as rag_cls, patch(
-            "backend_api.bootstrap.SpeechToTextService",
-            autospec=True,
-        ) as service_cls:
+        with patch("backend_api.bootstrap.build_document_catalog", return_value=None), patch(
+            "backend_api.RAG.RAGService",
+            return_value="rag-service",
+        ) as rag_cls, patch("backend_api.bootstrap.SpeechToTextService", autospec=True) as service_cls:
             bootstrap.build_service(args)
 
         rag_cls.assert_called_once_with()

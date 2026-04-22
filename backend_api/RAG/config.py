@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 import os
 
-from dotenv import load_dotenv
+from backend_api.env import load_environment
 
-load_dotenv()
+load_environment()
 
 
 @dataclass(slots=True)
