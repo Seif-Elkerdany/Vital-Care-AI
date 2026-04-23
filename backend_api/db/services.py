@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import secrets
+from urllib.parse import urlencode
 from uuid import UUID
 
 from .connection import Database
-from .repositories import ChatRepository, DocumentRepository, InvitationRepository, UserRepository
+from .repositories import (
+    AuthSessionRepository,
+    ChatRepository,
+    DocumentRepository,
+    InvitationRepository,
+    PasswordResetRepository,
+    UserRepository,
+)
 from .security import (
     AuthError,
     PasswordHasher,
     TokenService,
+    hash_password_reset_token,
+    hash_refresh_token,
     hash_invitation_token,
     normalize_email,
 )
@@ -21,13 +31,23 @@ class AuthService:
         database: Database,
         *,
         users: UserRepository,
+        auth_sessions: AuthSessionRepository,
+        password_resets: PasswordResetRepository,
         password_hasher: PasswordHasher,
         token_service: TokenService,
+        password_reset_token_ttl_seconds: int,
+        password_reset_email_sender=None,
+        password_reset_url_base: str | None = None,
     ) -> None:
         self.database = database
         self.users = users
+        self.auth_sessions = auth_sessions
+        self.password_resets = password_resets
         self.password_hasher = password_hasher
         self.token_service = token_service
+        self.password_reset_token_ttl_seconds = password_reset_token_ttl_seconds
+        self.password_reset_email_sender = password_reset_email_sender
+        self.password_reset_url_base = password_reset_url_base
 
     def register_doctor(self, *, email: str, password: str, full_name: str | None) -> dict:
         normalized_email = normalize_email(email)
@@ -44,27 +64,31 @@ class AuthService:
             )
             if created_user is None:
                 raise ValueError("A user with that email already exists.")
-            return {
-                "user": self._public_user(created_user),
-                "access_token": self.token_service.issue_token(created_user),
-            }
+            return self._issue_auth_tokens(connection, created_user)
 
     def login(self, *, email: str, password: str) -> dict:
-        normalized_email = normalize_email(email)
+        try:
+            normalized_email = normalize_email(email)
+        except ValueError as exc:
+            raise AuthError("Invalid email or password.") from exc
         with self.database.connect() as connection:
             user = self.users.get_by_email(connection, normalized_email)
 
         if user is None or not self.password_hasher.verify_password(password, user["password_hash"]):
             raise AuthError("Invalid email or password.")
 
-        return {
-            "user": self._public_user(user),
-            "access_token": self.token_service.issue_token(user),
-        }
+        with self.database.transaction() as connection:
+            session_user = self.users.get_by_id(connection, str(user["id"])) or user
+            return self._issue_auth_tokens(connection, session_user)
 
     def current_user(self, token: str) -> dict:
         claims = self.token_service.parse_token(token)
+        if claims.token_type != "access":
+            raise AuthError("Access token is required for this route.")
         with self.database.connect() as connection:
+            session = self.auth_sessions.get_by_id(connection, session_id=claims.session_id)
+            self._validate_session(session)
+            self.auth_sessions.touch_session(connection, session_id=claims.session_id)
             user = self.users.get_by_id(connection, claims.id)
 
         if user is None:
@@ -76,6 +100,135 @@ class AuthService:
         if user["role"] != "admin":
             raise AuthError("Admin access is required for this route.")
         return user
+
+    def refresh(self, *, refresh_token: str) -> dict:
+        claims = self.token_service.parse_token(refresh_token)
+        if claims.token_type != "refresh":
+            raise AuthError("Refresh token is required.")
+
+        with self.database.transaction() as connection:
+            session = self.auth_sessions.get_by_id(connection, session_id=claims.session_id)
+            self._validate_session(session)
+            if session is None or session["refresh_token_hash"] != hash_refresh_token(refresh_token):
+                raise AuthError("Refresh token is invalid.")
+
+            user = self.users.get_by_id(connection, claims.id)
+            if user is None:
+                raise AuthError("Authenticated user was not found.")
+
+            new_refresh_token, refresh_expires_at = self.token_service.issue_refresh_token(
+                user,
+                session_id=str(session["id"]),
+            )
+            rotated_session = self.auth_sessions.rotate_refresh_token(
+                connection,
+                session_id=str(session["id"]),
+                refresh_token_hash=hash_refresh_token(new_refresh_token),
+                expires_at=refresh_expires_at,
+            )
+            if rotated_session is None:
+                raise AuthError("Refresh token session is no longer active.")
+            access_token = self.token_service.issue_access_token(
+                user,
+                session_id=str(rotated_session["id"]),
+            )
+            return self._build_auth_response(
+                user,
+                access_token=access_token,
+                refresh_token=new_refresh_token,
+            )
+
+    def logout(self, *, token: str) -> None:
+        claims = self.token_service.parse_token(token)
+        with self.database.transaction() as connection:
+            session = self.auth_sessions.get_by_id(connection, session_id=claims.session_id)
+            self._validate_session(session)
+            revoked_session = self.auth_sessions.revoke_session(
+                connection,
+                session_id=claims.session_id,
+            )
+            if revoked_session is None:
+                raise AuthError("Session is already inactive.")
+
+    def request_password_reset(self, *, email: str) -> dict:
+        normalized_email = normalize_email(email)
+        email_delivery_enabled = (
+            self.password_reset_email_sender is not None
+            and self.password_reset_url_base
+        )
+        response_detail = (
+            "If that email exists, a password reset link has been sent."
+            if email_delivery_enabled
+            else "If that email exists, a password reset token has been issued."
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=max(60, self.password_reset_token_ttl_seconds)
+        )
+
+        with self.database.transaction() as connection:
+            user = self.users.get_by_email(connection, normalized_email)
+            if user is None:
+                return {
+                    "detail": response_detail,
+                    "reset_token": None,
+                    "expires_at": None,
+                }
+
+            raw_token = secrets.token_urlsafe(32)
+            reset_record = self.password_resets.create_token(
+                connection,
+                user_id=str(user["id"]),
+                token_hash=hash_password_reset_token(raw_token),
+                expires_at=expires_at,
+            )
+            if email_delivery_enabled:
+                self.password_reset_email_sender.send_password_reset(
+                    recipient_email=str(user["email"]),
+                    reset_url=self._build_password_reset_url(raw_token),
+                    expires_at=reset_record["expires_at"],
+                )
+                return {
+                    "detail": response_detail,
+                    "reset_token": None,
+                    "expires_at": reset_record["expires_at"],
+                }
+            return {
+                "detail": response_detail,
+                "reset_token": raw_token,
+                "expires_at": reset_record["expires_at"],
+            }
+
+    def reset_password(self, *, token: str, new_password: str) -> dict:
+        token_hash = hash_password_reset_token(token)
+        new_password_hash = self.password_hasher.hash_password(new_password)
+
+        with self.database.transaction() as connection:
+            reset_record = self.password_resets.get_by_token_hash(connection, token_hash=token_hash)
+            if reset_record is None:
+                raise ValueError("Password reset token is invalid.")
+            if reset_record.get("used_at") is not None:
+                raise ValueError("Password reset token has already been used.")
+            if reset_record["expires_at"] <= datetime.now(timezone.utc):
+                raise ValueError("Password reset token has expired.")
+
+            user = self.users.update_password_hash(
+                connection,
+                user_id=str(reset_record["user_id"]),
+                password_hash=new_password_hash,
+            )
+            if user is None:
+                raise ValueError("Authenticated user was not found.")
+
+            marked = self.password_resets.mark_used(
+                connection,
+                reset_token_id=str(reset_record["id"]),
+            )
+            if marked is None:
+                raise ValueError("Password reset token has already been used.")
+            self.auth_sessions.revoke_all_for_user(connection, user_id=str(user["id"]))
+            return {
+                "detail": "Password has been reset successfully.",
+            }
 
     def seed_admin(self, *, email: str, password: str, full_name: str | None) -> dict:
         normalized_email = normalize_email(email)
@@ -100,6 +253,56 @@ class AuthService:
             if created_user is None:
                 raise ValueError("Failed to create the initial admin user.")
             return self._public_user(created_user)
+
+    def _issue_auth_tokens(self, connection, user: dict) -> dict:
+        refresh_token, refresh_expires_at = self.token_service.issue_refresh_token(
+            user,
+            session_id="pending",
+        )
+        session = self.auth_sessions.create_session(
+            connection,
+            user_id=str(user["id"]),
+            refresh_token_hash=hash_refresh_token(refresh_token),
+            expires_at=refresh_expires_at,
+        )
+        session_id = str(session["id"])
+        access_token = self.token_service.issue_access_token(user, session_id=session_id)
+        refresh_token, refresh_expires_at = self.token_service.issue_refresh_token(
+            user,
+            session_id=session_id,
+        )
+        self.auth_sessions.rotate_refresh_token(
+            connection,
+            session_id=session_id,
+            refresh_token_hash=hash_refresh_token(refresh_token),
+            expires_at=refresh_expires_at,
+        )
+        return self._build_auth_response(
+            user,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+
+    def _build_auth_response(self, user: dict, *, access_token: str, refresh_token: str) -> dict:
+        return {
+            "user": self._public_user(user),
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        }
+
+    def _build_password_reset_url(self, token: str) -> str:
+        separator = "&" if "?" in str(self.password_reset_url_base) else "?"
+        return f"{self.password_reset_url_base}{separator}{urlencode({'token': token})}"
+
+    @staticmethod
+    def _validate_session(session: dict | None) -> None:
+        if session is None:
+            raise AuthError("Authenticated session was not found.")
+        if session.get("revoked_at") is not None:
+            raise AuthError("Session has been revoked.")
+        expires_at = session.get("expires_at")
+        if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+            raise AuthError("Session has expired.")
 
     def _public_user(self, user: dict) -> dict:
         return {

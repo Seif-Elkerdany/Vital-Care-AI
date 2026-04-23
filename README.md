@@ -101,6 +101,15 @@ QDRANT_COLLECTION=medical_documents
 DATABASE_URL=postgresql://medical_user:medical_password@localhost:5432/medical_rag_app
 
 APP_AUTH_SECRET=replace-this-with-a-long-random-secret
+AUTH_REFRESH_TOKEN_TTL_SECONDS=2592000
+AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS=3600
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM_EMAIL=your_email@gmail.com
+APP_RESET_PASSWORD_URL_BASE=http://localhost:5173/reset-password
 
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=change-me-admin-password
@@ -115,6 +124,18 @@ If the backend later runs inside Docker Compose instead of on your host machine,
 ```env
 DATABASE_URL=postgresql://medical_user:medical_password@postgres:5432/medical_rag_app
 ```
+
+Auth and reset-password notes:
+- `APP_AUTH_SECRET` should be a long random value and the same running backend must keep using it while tokens are active.
+- `AUTH_TOKEN_TTL_SECONDS` controls access token lifetime.
+- `AUTH_REFRESH_TOKEN_TTL_SECONDS` controls refresh/session lifetime.
+- `AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS` controls how long password reset links stay valid.
+- For Gmail SMTP, `SMTP_PASSWORD` must be a Gmail app password, not the normal Gmail login password.
+- `APP_RESET_PASSWORD_URL_BASE` is the frontend page used in reset emails. With `http://localhost:5173/reset-password`, the link only works on the same computer running the Vite frontend on port `5173`.
+- For another local device, use the frontend host machine IP, for example `http://192.168.1.25:5173/reset-password`.
+- For deployment, use the deployed frontend URL, for example `https://your-domain.com/reset-password`.
+- The reset email is only sent when all SMTP variables and `APP_RESET_PASSWORD_URL_BASE` are present.
+- The requested reset email must belong to an existing user in the current database. Unknown emails intentionally receive a generic success response and no email is sent.
 
 5. Apply migrations:
 
@@ -218,6 +239,10 @@ New PostgreSQL-backed routes:
 - `POST /auth/register`
 - `POST /auth/login`
 - `GET /auth/me`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/password-reset/request`
+- `POST /auth/password-reset/confirm`
 - `POST /auth/admin-invitations/accept`
 - `POST /chat/threads`
 - `GET /chat/threads`
@@ -227,6 +252,177 @@ New PostgreSQL-backed routes:
 - `POST /admin/guidelines/upload`
 - `GET /admin/guidelines`
 - `POST /admin/guidelines/{document_id}/approve`
+
+## Auth And Password Reset
+
+Registration and login:
+- user emails are normalized to lowercase and validated for normal email format
+- passwords must be at least 8 characters
+- passwords are stored as salted hashes, never as plain text
+- login returns an access token, refresh token, and user payload
+- logout revokes the current session
+- password reset revokes existing sessions after the password changes
+
+Password reset flow:
+
+1. A registered user requests a reset:
+
+```http
+POST /auth/password-reset/request
+```
+
+```json
+{
+  "email": "doctor@example.com"
+}
+```
+
+2. If SMTP is configured and the user exists, the backend emails a link like:
+
+```text
+http://localhost:5173/reset-password?token=RESET_TOKEN
+```
+
+3. The reset page must read the `token` query parameter and call:
+
+```http
+POST /auth/password-reset/confirm
+```
+
+```json
+{
+  "token": "RESET_TOKEN",
+  "new_password": "newsecretpass"
+}
+```
+
+4. The backend validates the one-time token, checks expiry, updates the password, marks the token used, and revokes old sessions.
+
+Important:
+- the backend does not verify that an inbox exists during registration
+- it validates email format only
+- inbox ownership can be added later with an email verification-link flow
+
+## Frontend Auth Integration Checklist
+
+Backend base URL:
+
+```text
+http://localhost:8000
+```
+
+Register:
+
+```http
+POST /auth/register
+```
+
+```json
+{
+  "email": "doctor@example.com",
+  "password": "secretpass",
+  "full_name": "Doctor One"
+}
+```
+
+Login:
+
+```http
+POST /auth/login
+```
+
+```json
+{
+  "email": "doctor@example.com",
+  "password": "secretpass"
+}
+```
+
+Register and login return:
+
+```json
+{
+  "access_token": "ACCESS_TOKEN",
+  "refresh_token": "REFRESH_TOKEN",
+  "token_type": "bearer",
+  "user": {
+    "id": "USER_ID",
+    "email": "doctor@example.com",
+    "full_name": "Doctor One",
+    "role": "doctor",
+    "created_at": "2026-04-23T12:00:00Z",
+    "updated_at": "2026-04-23T12:00:00Z"
+  }
+}
+```
+
+Authenticated requests:
+
+```http
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Current user:
+
+```http
+GET /auth/me
+```
+
+Refresh tokens:
+
+```http
+POST /auth/refresh
+```
+
+```json
+{
+  "refresh_token": "REFRESH_TOKEN"
+}
+```
+
+Logout:
+
+```http
+POST /auth/logout
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Request password reset:
+
+```http
+POST /auth/password-reset/request
+```
+
+```json
+{
+  "email": "doctor@example.com"
+}
+```
+
+The backend sends an email link using:
+
+```text
+APP_RESET_PASSWORD_URL_BASE?token=RESET_TOKEN
+```
+
+The frontend reset page should read `token` from the URL and confirm the new password:
+
+```http
+POST /auth/password-reset/confirm
+```
+
+```json
+{
+  "token": "RESET_TOKEN",
+  "new_password": "newsecretpass"
+}
+```
+
+Chat routes use the same bearer token:
+- `POST /chat/threads`
+- `GET /chat/threads`
+- `GET /chat/threads/{thread_id}/messages`
+- `POST /chat/threads/{thread_id}/turns`
 
 ## Manual Database Testing
 
@@ -270,7 +466,7 @@ Frontend contributors:
 Testing:
 
 ```bash
-python -m unittest
+pytest
 ```
 
 ## Module Guides

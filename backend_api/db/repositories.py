@@ -58,6 +58,18 @@ class UserRepository:
         )
         return cursor.fetchone()
 
+    def update_password_hash(self, connection, *, user_id: str, password_hash: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE users
+            SET password_hash = %s
+            WHERE id = %s
+            RETURNING id, email, full_name, role, password_hash, created_at, updated_at
+            """,
+            (password_hash, user_id),
+        )
+        return cursor.fetchone()
+
 
 class ChatRepository:
     def create_thread(
@@ -397,3 +409,133 @@ class InvitationRepository:
             (accepted_user_id, invitation_id),
         )
         return cursor.fetchone()
+
+
+class PasswordResetRepository:
+    def create_token(
+        self,
+        connection,
+        *,
+        user_id: str,
+        token_hash: str,
+        expires_at,
+    ) -> dict:
+        cursor = connection.execute(
+            """
+            INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+            VALUES (%s, %s, %s)
+            RETURNING id, user_id, token_hash, expires_at, used_at, created_at
+            """,
+            (user_id, token_hash, expires_at),
+        )
+        return cursor.fetchone()
+
+    def get_by_token_hash(self, connection, *, token_hash: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            SELECT id, user_id, token_hash, expires_at, used_at, created_at
+            FROM password_reset_tokens
+            WHERE token_hash = %s
+            """,
+            (token_hash,),
+        )
+        return cursor.fetchone()
+
+    def mark_used(self, connection, *, reset_token_id: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE password_reset_tokens
+            SET used_at = now()
+            WHERE id = %s
+              AND used_at IS NULL
+            RETURNING id, user_id, token_hash, expires_at, used_at, created_at
+            """,
+            (reset_token_id,),
+        )
+        return cursor.fetchone()
+
+
+class AuthSessionRepository:
+    def create_session(
+        self,
+        connection,
+        *,
+        user_id: str,
+        refresh_token_hash: str,
+        expires_at,
+    ) -> dict:
+        cursor = connection.execute(
+            """
+            INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at)
+            VALUES (%s, %s, %s)
+            RETURNING id, user_id, refresh_token_hash, expires_at, revoked_at, last_used_at, created_at
+            """,
+            (user_id, refresh_token_hash, expires_at),
+        )
+        return cursor.fetchone()
+
+    def get_by_id(self, connection, *, session_id: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            SELECT id, user_id, refresh_token_hash, expires_at, revoked_at, last_used_at, created_at
+            FROM auth_sessions
+            WHERE id = %s
+            """,
+            (session_id,),
+        )
+        return cursor.fetchone()
+
+    def rotate_refresh_token(self, connection, *, session_id: str, refresh_token_hash: str, expires_at) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE auth_sessions
+            SET refresh_token_hash = %s,
+                expires_at = %s,
+                last_used_at = now()
+            WHERE id = %s
+              AND revoked_at IS NULL
+            RETURNING id, user_id, refresh_token_hash, expires_at, revoked_at, last_used_at, created_at
+            """,
+            (refresh_token_hash, expires_at, session_id),
+        )
+        return cursor.fetchone()
+
+    def touch_session(self, connection, *, session_id: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE auth_sessions
+            SET last_used_at = now()
+            WHERE id = %s
+              AND revoked_at IS NULL
+            RETURNING id, user_id, refresh_token_hash, expires_at, revoked_at, last_used_at, created_at
+            """,
+            (session_id,),
+        )
+        return cursor.fetchone()
+
+    def revoke_session(self, connection, *, session_id: str) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = now(),
+                last_used_at = now()
+            WHERE id = %s
+              AND revoked_at IS NULL
+            RETURNING id, user_id, refresh_token_hash, expires_at, revoked_at, last_used_at, created_at
+            """,
+            (session_id,),
+        )
+        return cursor.fetchone()
+
+    def revoke_all_for_user(self, connection, *, user_id: str) -> int:
+        cursor = connection.execute(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = now(),
+                last_used_at = now()
+            WHERE user_id = %s
+              AND revoked_at IS NULL
+            """,
+            (user_id,),
+        )
+        return int(cursor.rowcount or 0)
