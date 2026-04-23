@@ -366,7 +366,9 @@ figure {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: 0;
+  height: 100%;
+  padding-top: 8px;
 }
 
 .calculator-display {
@@ -398,6 +400,109 @@ figure {
   padding-left: 18px;
 }
 
+.intake-card {
+  margin-top: 18px;
+}
+
+.intake-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intake-card__prompt {
+  margin-top: 10px;
+}
+
+.intake-card__actions {
+  margin-top: 12px;
+}
+
+.intake-nav-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.intake-action-button {
+  width: 100%;
+  font-size: 14px;
+  min-width: 0;
+  background: #f3f8fd;
+}
+
+.intake-summary {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.intake-summary__row {
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.intake-summary__value {
+  font-size: 13px;
+}
+
+.intake-summary__value--pending {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.intake-step-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.intake-step-input-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.intake-step-mic-button {
+  flex-shrink: 0;
+}
+
+.intake-step-mic-button--recording {
+  border-color: #c53030 !important;
+  background: #fff5f5 !important;
+  color: #c53030 !important;
+}
+
+.transcript-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.transcript-toggle i {
+  transition: transform 0.2s;
+}
+
+.transcript-toggle--open i {
+  transform: rotate(180deg);
+}
+
 .footer-action {
   display: flex;
   justify-content: flex-end;
@@ -419,6 +524,23 @@ figure {
   margin-right: 8px;
 }
 
+/* Primary action buttons: Vitals confirm, Patient Start Assessment, Finish session buttons */
+#confirm-vitals-button,
+#start-assessment-button {
+  background: #56a0dc;
+  border-color: #87b9e4;
+  color: #ffffff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* Slightly darker on dark theme for contrast */
+body.theme-dark #confirm-vitals-button,
+body.theme-dark #start-assessment-button {
+  background: #2b6ea3;
+  border-color: #2b6ea3;
+  color: #ffffff;
+}
+
 .summary-row {
   display: flex;
   justify-content: space-between;
@@ -435,7 +557,7 @@ figure {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  min-height: 120px;
+  min-height: 50px;
   display: block;
   box-sizing: border-box;
 }
@@ -567,8 +689,9 @@ body.theme-dark .step-card--complete .step-body {
 .chat-feed {
   display: grid;
   gap: 12px;
-  margin-top: 22px;
+  margin-top: 10px;
   flex: 1;
+  min-height: 0;
   align-content: start;
   overflow-y: auto;
   padding-right: 4px;
@@ -761,9 +884,10 @@ body.theme-dark .voice-debug-hit {
   grid-template-columns: minmax(0, 1fr) 52px;
   align-items: center;
   gap: 10px;
-  margin-top: 16px;
+  /* margin-top: auto; */
+  flex-shrink: 0;
   width: 100%;
-  padding: 14px 0 10px;
+  padding: 14px 0 6px;
   background: linear-gradient(180deg, rgba(241, 248, 255, 0) 0%, rgba(241, 248, 255, 0.96) 24%, rgba(241, 248, 255, 1) 100%);
 }
 
@@ -793,7 +917,8 @@ body.theme-dark .chat-input-bar {
   display: flex;
   justify-content: center;
   width: 100%;
-  padding: 6px 0 0;
+  /* padding: 6px 0 0; */
+  padding: 0 0 14px;
   background: linear-gradient(180deg, rgba(241, 248, 255, 1) 0%, rgba(241, 248, 255, 0.98) 100%);
   flex-shrink: 0;
 }
@@ -1657,7 +1782,7 @@ body.theme-dark .team-member--active {
    HOME DASHBOARD
 ═══════════════════════════════════════════ */
 #screen-home.screen--active {
-  padding: 14px 16px calc(88px + env(safe-area-inset-bottom, 0px));
+  padding: 14px 22px calc(88px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 14px;

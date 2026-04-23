@@ -86,31 +86,47 @@
             </button>
           </header>
 
-          <p class="section-label">Tap to start voice Input</p>
+          <p class="section-label">Tap to start voice input</p>
           <button class="voice-pad" type="button" id="vitals-voice-button" aria-label="Start microphone">
             <i class="fa-solid fa-microphone"></i>
           </button>
           <div class="status-panel" id="voice-status-message">Press Record Voice to capture the patient's vitals.</div>
 
           <div class="field-block">
-            <label class="field-label" for="transcript-preview">Transcript</label>
-            <textarea class="text-box text-box--large" id="transcript-preview" placeholder="Voice input will appear here..."></textarea>
+            <button class="transcript-toggle" type="button" id="transcript-toggle">
+              <span>View transcript</span>
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+            <textarea class="text-box text-box--large is-hidden" id="transcript-preview" placeholder="Transcript will build here as you complete each step..."></textarea>
           </div>
 
-          <div class="hint-card">
-            <p>Give the following information:</p>
-            <ul>
-              <li>Heart Rate</li>
-              <li>Respiration Rate</li>
-              <li>Temperature</li>
-              <li>Oxygen Saturation</li>
-              <li>Blood Pressure</li>
-              <li>Additional Info</li>
-            </ul>
-          </div>
+          <section class="card-panel intake-card">
+            <div class="intake-card__header">
+              <strong>Step-by-step Intake</strong>
+              <span class="mini-label" id="intake-step-counter">Step 1 of 8</span>
+            </div>
+            <p class="section-copy intake-card__prompt" id="intake-step-prompt">Capture the patient's age.</p>
+            <label class="field-label" for="intake-step-input">Type or tap mic for this step</label>
+            <div class="intake-step-input-row">
+              <input class="text-input" id="intake-step-input" type="text" placeholder="e.g. 9 years old" />
+              <button class="icon-button" type="button" id="intake-step-mic-button" aria-label="Record this step">
+                <i class="fa-solid fa-microphone"></i>
+              </button>
+            </div>
+
+            <div class="footer-action footer-action--stack intake-card__actions">
+              <button class="action-button intake-action-button" type="button" id="intake-save-step-button">Save Step Entry</button>
+              <div class="intake-nav-row">
+                <button class="action-button intake-action-button" type="button" id="intake-prev-step-button">Previous</button>
+                <button class="action-button intake-action-button" type="button" id="intake-next-step-button">Next</button>
+              </div>
+            </div>
+
+            <div class="intake-summary" id="intake-summary-list"></div>
+          </section>
 
           <div class="footer-action">
-            <button class="action-button" type="button" id="confirm-vitals-button">Confirm</button>
+            <button class="action-button" type="button" id="confirm-vitals-button">Confirm →</button>
           </div>
           <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
@@ -148,7 +164,12 @@
               <div class="vital-cell"><span class="mini-label">HR</span><strong id="patient-hr">75 bpm</strong></div>
               <div class="vital-cell"><span class="mini-label">Temp</span><strong id="patient-temp">98.6 F</strong></div>
               <div class="vital-cell"><span class="mini-label">RR</span><strong id="patient-rr">16 breaths/min</strong></div>
-              <div class="vital-cell vital-cell--wide"><span class="mini-label">SpO2</span><strong id="patient-spo2">99%</strong></div>
+              <div class="vital-cell"><span class="mini-label">SpO2</span><strong id="patient-spo2">99%</strong></div>
+              <div class="vital-cell"><span class="mini-label">FiO2</span><strong id="patient-fio2">N/A</strong></div>
+            </div>
+            <div class="summary-row summary-row--stack" style="margin-top:12px;">
+              <span class="mini-label">Respiratory Support</span>
+              <strong id="patient-respiratory-support">N/A</strong>
             </div>
           </section>
 
