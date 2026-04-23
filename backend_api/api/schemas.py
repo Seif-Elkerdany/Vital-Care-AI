@@ -26,8 +26,32 @@ class RegisterRequest(AuthRequest):
 
 class AuthTokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutResponse(BaseModel):
+    detail: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetRequestResponse(BaseModel):
+    detail: str
+    reset_token: str | None = None
+    expires_at: datetime | None = None
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
 
 
 class CreateThreadRequest(BaseModel):

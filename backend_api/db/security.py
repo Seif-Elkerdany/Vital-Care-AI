@@ -6,11 +6,21 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
+from uuid import uuid4
 
 
 class AuthError(Exception):
     """Raised when authentication or authorization fails."""
+
+
+_EMAIL_PATTERN = re.compile(
+    r"^(?=.{1,254}$)(?=.{1,64}@)"
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,63}$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +29,8 @@ class AuthenticatedUser:
     email: str
     full_name: str | None
     role: str
+    session_id: str
+    token_type: str
 
 
 class PasswordHasher:
@@ -63,19 +75,49 @@ class PasswordHasher:
 
 
 class TokenService:
-    def __init__(self, secret_key: str, *, ttl_seconds: int) -> None:
+    def __init__(
+        self,
+        secret_key: str,
+        *,
+        ttl_seconds: int,
+        refresh_ttl_seconds: int | None = None,
+    ) -> None:
         self._secret_key = secret_key.encode("utf-8")
         self._ttl_seconds = ttl_seconds
+        self._refresh_ttl_seconds = refresh_ttl_seconds or ttl_seconds
 
-    def issue_token(self, user: dict) -> str:
+    def issue_access_token(self, user: dict, *, session_id: str) -> str:
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._ttl_seconds)
         payload = {
             "sub": str(user["id"]),
             "email": str(user["email"]),
             "role": str(user["role"]),
             "full_name": user.get("full_name"),
+            "sid": session_id,
+            "typ": "access",
+            "jti": uuid4().hex,
             "exp": int(expires_at.timestamp()),
         }
+        return self._sign_payload(payload)
+
+    def issue_refresh_token(self, user: dict, *, session_id: str) -> tuple[str, datetime]:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._refresh_ttl_seconds)
+        payload = {
+            "sub": str(user["id"]),
+            "email": str(user["email"]),
+            "role": str(user["role"]),
+            "full_name": user.get("full_name"),
+            "sid": session_id,
+            "typ": "refresh",
+            "jti": uuid4().hex,
+            "exp": int(expires_at.timestamp()),
+        }
+        return self._sign_payload(payload), expires_at
+
+    def issue_token(self, user: dict) -> str:
+        return self.issue_access_token(user, session_id=uuid4().hex)
+
+    def _sign_payload(self, payload: dict) -> str:
         encoded_payload = self._encode_payload(payload)
         signature = hmac.new(
             self._secret_key,
@@ -114,6 +156,8 @@ class TokenService:
             email=str(payload["email"]),
             full_name=payload.get("full_name"),
             role=str(payload["role"]),
+            session_id=str(payload["sid"]),
+            token_type=str(payload.get("typ") or "access"),
         )
 
     def _encode_payload(self, payload: dict) -> str:
@@ -129,10 +173,26 @@ class TokenService:
 
 def normalize_email(email: str) -> str:
     normalized = (email or "").strip().lower()
-    if not normalized or "@" not in normalized:
+    if not normalized or not _EMAIL_PATTERN.fullmatch(normalized):
+        raise ValueError("A valid email address is required.")
+    local_part, domain = normalized.rsplit("@", 1)
+    if (
+        ".." in local_part
+        or local_part.startswith(".")
+        or local_part.endswith(".")
+        or ".." in domain
+    ):
         raise ValueError("A valid email address is required.")
     return normalized
 
 
 def hash_invitation_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def hash_password_reset_token(token: str) -> str:
     return hashlib.sha256((token or "").encode("utf-8")).hexdigest()

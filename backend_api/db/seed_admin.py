@@ -3,7 +3,7 @@ from __future__ import annotations
 from .config import get_admin_seed_settings, get_auth_settings, get_database_settings
 from .connection import Database
 from .migrate import apply_migrations
-from .repositories import UserRepository
+from .repositories import AuthSessionRepository, PasswordResetRepository, UserRepository
 from .security import PasswordHasher, TokenService
 from .services import AuthService
 
@@ -18,11 +18,17 @@ def main() -> None:
     auth_service = AuthService(
         database,
         users=UserRepository(),
+        auth_sessions=AuthSessionRepository(),
+        password_resets=PasswordResetRepository(),
         password_hasher=PasswordHasher(),
         token_service=TokenService(
             auth_settings.secret_key,
             ttl_seconds=auth_settings.token_ttl_seconds,
+            refresh_ttl_seconds=auth_settings.refresh_token_ttl_seconds,
         ),
+        password_reset_token_ttl_seconds=auth_settings.password_reset_token_ttl_seconds,
+        password_reset_email_sender=None,
+        password_reset_url_base=None,
     )
     admin_user = auth_service.seed_admin(
         email=seed_settings.email,
