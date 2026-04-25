@@ -77,8 +77,8 @@ def create_app(
         return stt_service.status()
 
     @app.post("/recording/toggle", response_model=ToggleRecordingResponse)
-    async def toggle_recording():
-        return ToggleRecordingResponse(state=stt_service.toggle_recording())
+    async def toggle_recording(stt_only: bool = Query(default=False)):
+        return ToggleRecordingResponse(state=stt_service.toggle_recording(stt_only=stt_only))
 
     @app.get("/transcriptions/latest", response_model=TranscriptionResult)
     async def latest_transcription():

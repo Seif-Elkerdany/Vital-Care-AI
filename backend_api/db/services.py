@@ -150,6 +150,18 @@ class AuthService:
             if revoked_session is None:
                 raise AuthError("Session is already inactive.")
 
+    def update_profile(self, *, user_id: str, full_name: str | None) -> dict:
+        clean_name = (full_name or "").strip() or None
+        with self.database.transaction() as connection:
+            user = self.users.update_full_name(
+                connection,
+                user_id=user_id,
+                full_name=clean_name,
+            )
+        if user is None:
+            raise ValueError("Authenticated user was not found.")
+        return self._public_user(user)
+
     def request_password_reset(self, *, email: str) -> dict:
         normalized_email = normalize_email(email)
         email_delivery_enabled = (

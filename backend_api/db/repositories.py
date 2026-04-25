@@ -70,6 +70,18 @@ class UserRepository:
         )
         return cursor.fetchone()
 
+    def update_full_name(self, connection, *, user_id: str, full_name: str | None) -> dict | None:
+        cursor = connection.execute(
+            """
+            UPDATE users
+            SET full_name = %s
+            WHERE id = %s
+            RETURNING id, email, full_name, role, password_hash, created_at, updated_at
+            """,
+            (full_name, user_id),
+        )
+        return cursor.fetchone()
+
 
 class ChatRepository:
     def create_thread(

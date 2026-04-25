@@ -24,6 +24,10 @@ class RegisterRequest(AuthRequest):
     full_name: str | None = None
 
 
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = None
+
+
 class AuthTokenResponse(BaseModel):
     access_token: str
     refresh_token: str

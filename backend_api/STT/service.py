@@ -109,7 +109,7 @@ class SpeechToTextService:
 
         return None
 
-    def toggle_recording(self):
+    def toggle_recording(self, *, stt_only: bool = False):
         try:
             if not self.recorder.recording:
                 if self._busy.is_set():
@@ -129,7 +129,7 @@ class SpeechToTextService:
             self._last_error = None
             self._last_event = "transcribing"
             try:
-                self._start_transcription(audio)
+                self._start_transcription(audio, stt_only=stt_only)
             except Exception:
                 self._busy.clear()
                 raise
@@ -139,13 +139,18 @@ class SpeechToTextService:
             self._last_event = "error"
             return "error"
 
-    def _start_transcription(self, audio):
-        worker = threading.Thread(target=self._transcribe_worker, args=(audio,), daemon=True)
+    def _start_transcription(self, audio, *, stt_only: bool = False):
+        worker = threading.Thread(
+            target=self._transcribe_worker,
+            args=(audio,),
+            kwargs={"stt_only": stt_only},
+            daemon=True,
+        )
         worker.start()
 
-    def _transcribe_worker(self, audio):
+    def _transcribe_worker(self, audio, *, stt_only: bool = False):
         try:
-            result = self.process_audio(audio)
+            result = self.process_audio(audio, stt_only=stt_only)
             self._last_error = None
             self._last_event = "published"
             print(f"[{result.elapsed_seconds:.2f}s] {result.text}")
@@ -162,13 +167,17 @@ class SpeechToTextService:
         finally:
             self._busy.clear()
 
-    def process_audio(self, audio) -> TranscriptionResult:
+    def process_audio(self, audio, *, stt_only: bool = False) -> TranscriptionResult:
         started = time.perf_counter()
         text = self.engine.transcribe(audio)
         elapsed = time.perf_counter() - started
         final_text = (text or "").strip() or "(no speech recognized)"
 
-        return self._process_text(final_text, transcription_elapsed=elapsed)
+        return self._process_text(
+            final_text,
+            transcription_elapsed=elapsed,
+            run_pipeline=not stt_only,
+        )
 
     def process_text_input(self, text: str) -> TranscriptionResult:
         cleaned = (text or "").strip()
@@ -192,13 +201,19 @@ class SpeechToTextService:
         finally:
             self._busy.clear()
 
-    def _process_text(self, input_text: str, *, transcription_elapsed: float) -> TranscriptionResult:
+    def _process_text(
+        self,
+        input_text: str,
+        *,
+        transcription_elapsed: float,
+        run_pipeline: bool = True,
+    ) -> TranscriptionResult:
         pipeline_elapsed = None
         structured_query = None
         retrievals = None
         rag_error = None
 
-        if self.pipeline_engine is not None:
+        if run_pipeline and self.pipeline_engine is not None:
             pipeline_started = time.perf_counter()
             try:
                 pipeline_result = self.pipeline_engine.run(input_text)
@@ -211,15 +226,21 @@ class SpeechToTextService:
                 llm_response = f"Pipeline failed: {exc}"
             pipeline_elapsed = time.perf_counter() - pipeline_started
             llm_elapsed = pipeline_elapsed
-        else:
+        elif run_pipeline:
             llm_response, llm_elapsed = self._generate_llm_response(input_text)
+        else:
+            llm_response = None
+            llm_elapsed = None
 
-        tts_input = llm_response or input_text
-        tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
+        if run_pipeline:
+            tts_input = llm_response or input_text
+            tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
+        else:
+            tts_audio_wav, tts_elapsed, tts_error = (None, None, None)
         tts_wav_path = None
         tts_mp3_path = None
 
-        if llm_response is None and self.tts_engine is not None:
+        if run_pipeline and llm_response is None and self.tts_engine is not None:
             llm_response = "[LLM disabled] Using transcript text for TTS."
 
         if tts_audio_wav is not None:

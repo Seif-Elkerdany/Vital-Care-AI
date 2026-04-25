@@ -16,6 +16,7 @@ from .schemas import (
     PasswordResetRequestResponse,
     RefreshTokenRequest,
     RegisterRequest,
+    UpdateProfileRequest,
     UserResponse,
 )
 
@@ -46,6 +47,16 @@ def build_auth_router(auth_service, invitation_service):
     @router.get("/me", response_model=UserResponse)
     async def me(user=Depends(current_user)):
         return user
+
+    @router.patch("/me", response_model=UserResponse)
+    async def update_me(payload: UpdateProfileRequest, user=Depends(current_user)):
+        try:
+            return auth_service.update_profile(
+                user_id=str(user["id"]),
+                full_name=payload.full_name,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.post("/refresh", response_model=AuthTokenResponse)
     async def refresh(payload: RefreshTokenRequest):
