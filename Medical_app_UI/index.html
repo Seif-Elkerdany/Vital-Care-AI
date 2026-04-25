@@ -60,12 +60,8 @@
         <section class="screen screen--active" id="screen-home">
           <!-- Header -->
           <header class="home-header">
-            <div class="home-header__brand">
-              <div class="home-logo-icon"><img src="./images/vc_logo.png" alt="VC Logo" class="home-logo-img" /></div>
-              <div>
-                <h1 class="home-title">Vital Care AI</h1>
-              </div>
-            </div>
+            <div class="home-logo-icon"><img src="./images/vc_logo.png" alt="VC Logo" class="home-logo-img" /></div>
+            <h1 class="home-title">Vital Care AI</h1>
             <button class="icon-button" type="button" id="open-menu-button" aria-label="Open menu">
               <i class="fa-regular fa-circle-user" style="font-size:22px;"></i>
             </button>
@@ -116,7 +112,7 @@
             </button>
           </div>
 
-          <p class="home-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-vitals">
@@ -132,32 +128,49 @@
             </button>
           </header>
 
-          <p class="section-label">Tap to start voice Input</p>
+          <p class="section-label">Tap to start voice input</p>
           <button class="voice-pad" type="button" id="vitals-voice-button" aria-label="Start microphone">
             <i class="fa-solid fa-microphone"></i>
           </button>
           <div class="status-panel" id="voice-status-message">Press Record Voice to capture the patient's vitals.</div>
 
           <div class="field-block">
-            <label class="field-label" for="transcript-preview">Transcript</label>
-            <textarea class="text-box text-box--large" id="transcript-preview" placeholder="Voice input will appear here..."></textarea>
+            <button class="transcript-toggle" type="button" id="transcript-toggle">
+              <span>View transcript</span>
+              <i class="fa-solid fa-chevron-down"></i>
+            </button>
+            <textarea class="text-box text-box--large is-hidden" id="transcript-preview" placeholder="Transcript will build here as you complete each step..."></textarea>
           </div>
 
-          <div class="hint-card">
-            <p>Give the following information:</p>
-            <ul>
-              <li>Heart Rate</li>
-              <li>Respiration Rate</li>
-              <li>Temperature</li>
-              <li>Oxygen Saturation</li>
-              <li>Blood Pressure</li>
-              <li>Additional Info</li>
-            </ul>
-          </div>
+          <section class="card-panel intake-card">
+            <div class="intake-card__header">
+              <strong>Step-by-step Intake</strong>
+              <span class="mini-label" id="intake-step-counter">Step 1 of 8</span>
+            </div>
+            <p class="section-copy intake-card__prompt" id="intake-step-prompt">Capture the patient's age.</p>
+            <label class="field-label" for="intake-step-input">Type or tap mic for this step</label>
+            <div class="intake-step-input-row">
+              <input class="text-input" id="intake-step-input" type="text" placeholder="e.g. 9 years old" />
+              <button class="icon-button" type="button" id="intake-step-mic-button" aria-label="Record this step">
+                <i class="fa-solid fa-microphone"></i>
+              </button>
+            </div>
+
+            <div class="footer-action footer-action--stack intake-card__actions">
+              <button class="action-button intake-action-button" type="button" id="intake-save-step-button">Save Step Entry</button>
+              <div class="intake-nav-row">
+                <button class="action-button intake-action-button" type="button" id="intake-prev-step-button">Previous</button>
+                <button class="action-button intake-action-button" type="button" id="intake-next-step-button">Next</button>
+              </div>
+            </div>
+
+            <div class="intake-summary" id="intake-summary-list"></div>
+          </section>
 
           <div class="footer-action">
-            <button class="action-button" type="button" id="confirm-vitals-button">Confirm</button>
+            <button class="action-button" type="button" id="confirm-vitals-button">Confirm →</button>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-patient">
@@ -193,7 +206,12 @@
               <div class="vital-cell"><span class="mini-label">HR</span><strong id="patient-hr">75 bpm</strong></div>
               <div class="vital-cell"><span class="mini-label">Temp</span><strong id="patient-temp">98.6 F</strong></div>
               <div class="vital-cell"><span class="mini-label">RR</span><strong id="patient-rr">16 breaths/min</strong></div>
-              <div class="vital-cell vital-cell--wide"><span class="mini-label">SpO2</span><strong id="patient-spo2">99%</strong></div>
+              <div class="vital-cell"><span class="mini-label">SpO2</span><strong id="patient-spo2">99%</strong></div>
+              <div class="vital-cell"><span class="mini-label">FiO2</span><strong id="patient-fio2">N/A</strong></div>
+            </div>
+            <div class="summary-row summary-row--stack" style="margin-top:12px;">
+              <span class="mini-label">Respiratory Support</span>
+              <strong id="patient-respiratory-support">N/A</strong>
             </div>
           </section>
 
@@ -208,6 +226,7 @@ Cultures drawn</textarea>
           <div class="footer-action">
             <button class="action-button" type="button" id="start-assessment-button">Start Assessment</button>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-steps">
@@ -238,6 +257,7 @@ Cultures drawn</textarea>
             <div class="result-card" id="steps-progress">0 of 4 steps completed</div>
             <button class="action-button" type="button" id="finish-steps-button" disabled>Finish</button>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-voice">
@@ -248,8 +268,8 @@ Cultures drawn</textarea>
             <div class="screen-header__title-group">
               <h1 class="screen-title">Voice Chatbot</h1>
             </div>
-            <button class="icon-button" type="button" id="open-menu-button-voice" aria-label="Open menu">
-              <i class="fa-solid fa-bars"></i>
+            <button class="icon-button" type="button" data-screen-target="profile" aria-label="Profile">
+              <i class="fa-regular fa-circle-user" style="font-size:22px;"></i>
             </button>
           </header>
 
@@ -305,6 +325,7 @@ Cultures drawn</textarea>
               Add `procedure.jpeg` to the `Medical_app_UI/images` folder to show the full guideline image here.
             </figcaption>
           </figure>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <div class="guideline-lightbox is-hidden" id="guideline-lightbox" role="dialog" aria-modal="true" aria-label="Zoomed guideline image">
@@ -359,6 +380,7 @@ Cultures drawn</textarea>
             <button class="action-button" type="button" id="profile-save-btn">Save</button>
             <button class="menu-card" type="button" id="profile-logout-btn">Log Out</button>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-settings">
@@ -369,7 +391,9 @@ Cultures drawn</textarea>
             <div class="screen-header__title-group">
               <h1 class="screen-title">Settings</h1>
             </div>
-            <div class="screen-header__spacer"></div>
+            <button class="icon-button" type="button" data-screen-target="profile" aria-label="Profile">
+              <i class="fa-regular fa-circle-user" style="font-size:22px;"></i>
+            </button>
           </header>
 
           <div class="settings-list">
@@ -415,6 +439,7 @@ Cultures drawn</textarea>
               <input id="volume-slider" type="range" min="0" max="100" value="70" />
             </label>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <section class="screen" id="screen-calculator">
@@ -425,7 +450,9 @@ Cultures drawn</textarea>
             <div class="screen-header__title-group">
               <h1 class="screen-title">Calculator</h1>
             </div>
-            <div class="screen-header__spacer"></div>
+            <button class="icon-button" type="button" data-screen-target="profile" aria-label="Profile">
+              <i class="fa-regular fa-circle-user" style="font-size:22px;"></i>
+            </button>
           </header>
 
           <!-- Condition selector -->
@@ -521,6 +548,7 @@ Cultures drawn</textarea>
             <p class="calc-footer-note"><i class="fa-regular fa-file-lines"></i> Follow local protocols. Reassess frequently.</p>
 
           </div><!-- /calc-scroll-body -->
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
 
         </section>
 
@@ -550,6 +578,7 @@ Cultures drawn</textarea>
               <button class="action-button notes-save-btn" type="button" id="notes-save-btn">Save</button>
             </div>
           </div>
+          <p class="screen-copyright"><i class="fa-regular fa-copyright"></i> 2026 Vital Care AI</p>
         </section>
 
         <nav class="bottom-nav" id="bottom-nav">

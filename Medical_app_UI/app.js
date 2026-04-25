@@ -87,6 +87,36 @@
     }
   };
 
+  const VITAL_INTAKE_STEPS = [
+    { key: "age", label: "Age", prompt: "Capture the patient's age.", placeholder: "e.g. 9 years old" },
+    { key: "weight", label: "Weight", prompt: "Capture the patient's weight.", placeholder: "e.g. 60 pounds" },
+    { key: "heartRate", label: "Heart Rate", prompt: "Capture heart rate.", placeholder: "e.g. 128 bpm" },
+    { key: "bloodPressure", label: "Blood Pressure", prompt: "Capture blood pressure.", placeholder: "e.g. 92/58 mmHg" },
+    { key: "temperature", label: "Temperature", prompt: "Capture temperature.", placeholder: "e.g. 101.3 F" },
+    { key: "respiratoryRate", label: "Respiratory Rate", prompt: "Capture respiratory rate.", placeholder: "e.g. 24 breaths/min" },
+    { key: "oxygen", label: "SpO2", prompt: "Capture oxygen saturation.", placeholder: "e.g. 93%" },
+    { key: "fio2", label: "FiO2", prompt: "Capture FiO2.", placeholder: "e.g. 40%" },
+    { key: "respiratorySupport", label: "Respiratory Support", prompt: "Capture respiratory support type.", placeholder: "e.g. nasal cannula, non-invasive ventilation" },
+    { key: "additionalInfo", label: "Additional Info", prompt: "Capture any additional notes.", placeholder: "e.g. lactate, cultures drawn, delayed capillary refill, lethargic" }
+  ];
+
+  function createBlankIntakeEntries() {
+    return VITAL_INTAKE_STEPS.reduce(function (entries, step) {
+      entries[step.key] = "";
+      return entries;
+    }, {});
+  }
+
+  function createBlankProtocolRecord() {
+    return {
+      transcript: "",
+      statusMessage: "Press Record Voice to capture the patient's vitals.",
+      patient: createBlankPatient(),
+      intakeEntries: createBlankIntakeEntries(),
+      intakeStepIndex: 0
+    };
+  }
+
   const screens = {
     auth: document.getElementById("screen-auth"),
     home: document.getElementById("screen-home"),
@@ -110,6 +140,8 @@
       temperature: "N/A",
       respiratoryRate: "N/A",
       oxygen: "N/A",
+      fio2: "N/A",
+      respiratorySupport: "N/A",
       additionalInfo: "N/A"
     };
   }
@@ -194,16 +226,8 @@
     lastHandledAt: null,
     pendingRecordingTarget: null,
     protocolData: {
-      "Sepsis": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      },
-      "Septic Shock": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      }
+      "Sepsis": createBlankProtocolRecord(),
+      "Septic Shock": createBlankProtocolRecord()
     },
     chatData: {
       summary: "",
@@ -238,16 +262,8 @@
 
   function sanitizeProtocolData(protocolData) {
     const fallback = {
-      "Sepsis": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      },
-      "Septic Shock": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      }
+      "Sepsis": createBlankProtocolRecord(),
+      "Septic Shock": createBlankProtocolRecord()
     };
 
     Object.keys(fallback).forEach(function (protocolName) {
@@ -255,7 +271,14 @@
       fallback[protocolName] = {
         transcript: savedRecord && typeof savedRecord.transcript === "string" ? savedRecord.transcript : fallback[protocolName].transcript,
         statusMessage: savedRecord && typeof savedRecord.statusMessage === "string" ? savedRecord.statusMessage : fallback[protocolName].statusMessage,
-        patient: sanitizePatient(savedRecord && savedRecord.patient)
+        patient: sanitizePatient(savedRecord && savedRecord.patient),
+        intakeEntries: Object.assign(
+          createBlankIntakeEntries(),
+          savedRecord && savedRecord.intakeEntries && typeof savedRecord.intakeEntries === "object" ? savedRecord.intakeEntries : {}
+        ),
+        intakeStepIndex: savedRecord && Number.isFinite(Number(savedRecord.intakeStepIndex))
+          ? Math.max(0, Math.min(VITAL_INTAKE_STEPS.length - 1, Number(savedRecord.intakeStepIndex)))
+          : 0
       };
     });
 
@@ -408,6 +431,15 @@
   }
 
   const transcriptPreview = document.getElementById("transcript-preview");
+  const transcriptToggle = document.getElementById("transcript-toggle");
+  const intakeStepCounter = document.getElementById("intake-step-counter");
+  const intakeStepPrompt = document.getElementById("intake-step-prompt");
+  const intakeStepInput = document.getElementById("intake-step-input");
+  const intakeSaveStepButton = document.getElementById("intake-save-step-button");
+  const intakePrevStepButton = document.getElementById("intake-prev-step-button");
+  const intakeNextStepButton = document.getElementById("intake-next-step-button");
+  const intakeStepMicButton = document.getElementById("intake-step-mic-button");
+  const intakeSummaryList = document.getElementById("intake-summary-list");
   const additionalInfo = document.getElementById("additional-info");
   const stepsList = document.getElementById("steps-list");
   const stepsProtocolTitle = document.getElementById("steps-protocol-title");
@@ -421,6 +453,8 @@
   const patientTemp = document.getElementById("patient-temp");
   const patientRr = document.getElementById("patient-rr");
   const patientSpo2 = document.getElementById("patient-spo2");
+  const patientFio2 = document.getElementById("patient-fio2");
+  const patientRespiratorySupport = document.getElementById("patient-respiratory-support");
   const chatFeed = document.getElementById("chat-feed");
   const voiceStatusMessage = document.getElementById("voice-status-message");
   const guidelineImage = document.getElementById("guideline-image");
@@ -602,6 +636,11 @@
     }
     Object.keys(screens).forEach(function (key) {
       screens[key].classList.toggle("screen--active", key === name);
+    });
+    document.querySelectorAll(".bottom-nav__btn[data-screen-target]").forEach(function (button) {
+      const isActive = button.dataset.screenTarget === name;
+      button.classList.toggle("bottom-nav__btn--active", isActive);
+      button.setAttribute("aria-current", isActive ? "page" : "false");
     });
     state.currentScreen = name;
     if (screens[name]) {
@@ -804,9 +843,155 @@
     }
 
     const record = getProtocolRecord(state.selectedProtocol);
+    const savedScroll = screens.vitals.scrollTop;
     transcriptPreview.value = record.transcript;
     voiceStatusMessage.textContent = record.statusMessage;
+    renderIntakeStep(record);
+    renderPatientInfo();
+    screens.vitals.scrollTop = savedScroll;
     saveState();
+  }
+
+  function buildTranscriptFromIntake(record) {
+    const entries = (record && record.intakeEntries) || {};
+    const lines = [];
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = String(entries[step.key] || "").trim();
+      if (value) {
+        lines.push(step.label + ": " + value);
+      }
+    });
+    return lines.join(". ");
+  }
+
+  function getCurrentIntakeStep(record) {
+    const safeIndex = Math.max(0, Math.min(VITAL_INTAKE_STEPS.length - 1, Number(record.intakeStepIndex) || 0));
+    record.intakeStepIndex = safeIndex;
+    return VITAL_INTAKE_STEPS[safeIndex];
+  }
+
+  function mergeParsedPatient(targetPatient, parsedPatient) {
+    const merged = sanitizePatient(targetPatient);
+    Object.keys(parsedPatient || {}).forEach(function (key) {
+      const value = parsedPatient[key];
+      if (value && value !== "N/A") {
+        merged[key] = value;
+      }
+    });
+    return merged;
+  }
+
+  function extractIntakeStepValue(stepKey, text) {
+    const parsed = parsePatientTranscript(text);
+    if (stepKey === "additionalInfo") {
+      const notes = (parsed.additionalInfo && parsed.additionalInfo !== "N/A" ? parsed.additionalInfo : text).trim();
+      return notes;
+    }
+    const mapped = parsed[stepKey];
+    if (mapped && mapped !== "N/A") {
+      return mapped;
+    }
+    return String(text || "").trim();
+  }
+
+  function applyIntakeStepFromText(record, rawText) {
+    const step = getCurrentIntakeStep(record);
+    const source = String(rawText || "").trim();
+    if (!source) {
+      return false;
+    }
+
+    const value = extractIntakeStepValue(step.key, source);
+    if (!value) {
+      return false;
+    }
+
+    record.intakeEntries[step.key] = value;
+    record.patient[step.key] = value;
+    record.transcript = buildTranscriptFromIntake(record) || source;
+
+    if (record.intakeStepIndex < VITAL_INTAKE_STEPS.length - 1) {
+      record.intakeStepIndex += 1;
+    }
+    return true;
+  }
+
+  function hasCapturedValue(value) {
+    const normalized = String(value || "").trim();
+    return !!normalized && normalized.toUpperCase() !== "N/A";
+  }
+
+  function findNextMissingIntakeStepIndex(record) {
+    for (let index = 0; index < VITAL_INTAKE_STEPS.length; index += 1) {
+      const stepKey = VITAL_INTAKE_STEPS[index].key;
+      if (!hasCapturedValue(record.intakeEntries[stepKey])) {
+        return index;
+      }
+    }
+    return VITAL_INTAKE_STEPS.length - 1;
+  }
+
+  function applyHybridIntakeFromTranscript(record, rawText) {
+    const source = String(rawText || "").trim();
+    if (!source) {
+      return { updatedCount: 0, nextMissingStep: getCurrentIntakeStep(record) };
+    }
+
+    const parsed = parsePatientTranscript(source);
+    const updatedLabels = [];
+
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = parsed[step.key];
+      if (hasCapturedValue(value)) {
+        record.intakeEntries[step.key] = value;
+        record.patient[step.key] = value;
+        updatedLabels.push(step.label);
+      }
+    });
+
+    if (!updatedLabels.length) {
+      const fallbackSaved = applyIntakeStepFromText(record, source);
+      return {
+        updatedCount: fallbackSaved ? 1 : 0,
+        nextMissingStep: getCurrentIntakeStep(record)
+      };
+    }
+
+    record.intakeStepIndex = findNextMissingIntakeStepIndex(record);
+    record.transcript = buildTranscriptFromIntake(record) || source;
+    return {
+      updatedCount: updatedLabels.length,
+      nextMissingStep: getCurrentIntakeStep(record)
+    };
+  }
+
+  function renderIntakeStep(record) {
+    if (!record) {
+      return;
+    }
+    const step = getCurrentIntakeStep(record);
+    intakeStepCounter.textContent = "Step " + (record.intakeStepIndex + 1) + " of " + VITAL_INTAKE_STEPS.length;
+    intakeStepPrompt.textContent = step.prompt;
+    intakeStepInput.placeholder = step.placeholder;
+    intakeStepInput.value = record.intakeEntries[step.key] || "";
+    intakePrevStepButton.disabled = record.intakeStepIndex <= 0;
+    intakeNextStepButton.disabled = record.intakeStepIndex >= VITAL_INTAKE_STEPS.length - 1;
+
+    intakeSummaryList.innerHTML = "";
+    VITAL_INTAKE_STEPS.forEach(function (item) {
+      const row = document.createElement("div");
+      row.className = "intake-summary__row";
+      const label = document.createElement("span");
+      label.className = "mini-label";
+      label.textContent = item.label;
+      const value = document.createElement("strong");
+      const savedValue = String(record.intakeEntries[item.key] || "").trim();
+      value.textContent = savedValue || "Pending";
+      value.className = savedValue ? "intake-summary__value" : "intake-summary__value intake-summary__value--pending";
+      row.appendChild(label);
+      row.appendChild(value);
+      intakeSummaryList.appendChild(row);
+    });
   }
 
   function navigateTo(name) {
@@ -912,6 +1097,8 @@
     patientTemp.textContent = formatTemperatureCanonical(patient.temperature);
     patientRr.textContent = patient.respiratoryRate;
     patientSpo2.textContent = patient.oxygen;
+    patientFio2.textContent = patient.fio2;
+    patientRespiratorySupport.textContent = patient.respiratorySupport;
     additionalInfo.value = patient.additionalInfo;
     saveState();
   }
@@ -1050,6 +1237,8 @@
       "Temperature: " + patient.temperature,
       "Respiratory Rate: " + patient.respiratoryRate,
       "SpO2: " + patient.oxygen,
+      "FiO2: " + patient.fio2,
+      "Respiratory Support: " + patient.respiratorySupport,
       "Additional Notes: " + patient.additionalInfo
     ].join("\n");
   }
@@ -1311,6 +1500,9 @@
                      getLastMatch(normalized, /(\d+(?:\.\d+)?)\s*(f|fahrenheit|c|celsius)\b/g);
     const rrMatch = getLastMatch(normalized, new RegExp("(?:respiration rate|respiratory rate|rr)\\s+" + NUM, "g"));
     const spo2Match = getLastMatch(normalized, new RegExp("(?:spo2|sp o2|oxygen saturation|oxygen)\\s+" + NUM, "g"));
+    const fio2Match = getLastMatch(normalized, /(?:fio2|fi o2|fraction of inspired oxygen)\s+(?:is|of|at|:)?\s*(\d+(?:\.\d+)?)\s*%?/g);
+    const supportMatch = getLastMatch(normalized, /(?:respiratory support|oxygen support|support type|airway support)\s+(?:is|of|at|:)?\s*([a-z0-9\- ]+)/g) ||
+                         getLastMatch(normalized, /\b(nasal cannula|high[- ]flow nasal cannula|non[- ]invasive ventilation|cpap|bipap|non[- ]rebreather|simple face mask|room air|mechanical ventilation|intubated)\b/g);
 
     if (ageMatch) patient.age = ageMatch[1];
     if (weightMatch) {
@@ -1332,6 +1524,8 @@
     }
     if (rrMatch) patient.respiratoryRate = rrMatch[1] + " breaths/min";
     if (spo2Match) patient.oxygen = spo2Match[1] + "%";
+    if (fio2Match) patient.fio2 = fio2Match[1] + "%";
+    if (supportMatch) patient.respiratorySupport = (supportMatch[1] || supportMatch[0] || "").trim();
 
     // Extract additional clinical notes — anything that isn't a vital reading
     var vitalSegmentPatterns = [
@@ -1340,6 +1534,8 @@
       /temperature|\btemp\b/,
       /respiratory rate|respiration rate|\brr\b/,
       /oxygen saturation|spo2|sp o2/,
+      /fio2|fi o2|fraction of inspired oxygen/,
+      /respiratory support|oxygen support|support type|nasal cannula|high[- ]flow|cpap|bipap|non[- ]rebreather|room air|mechanical ventilation|intubated/,
       /\d+\s*bpm/,
       /\d+\s*(?:\/|over)\s*\d+/,
       /\d+(?:\.\d+)?\s*(?:degrees?|fahrenheit|celsius)/,
@@ -1675,18 +1871,29 @@
       } else if (isProtocolTarget(target)) {
         const record = getProtocolRecord(target);
         record.transcript = latest.text || "";
-        record.patient = parsePatientTranscript(record.transcript);
+        if (record.transcript) {
+          const intakeResult = applyHybridIntakeFromTranscript(record, record.transcript);
+          if (intakeResult.updatedCount > 1) {
+            record.statusMessage = "Saved " + intakeResult.updatedCount + " fields from recording. Next: " + intakeResult.nextMissingStep.label + ".";
+          } else if (intakeResult.updatedCount === 1) {
+            record.statusMessage = "Saved one field from recording. Next: " + intakeResult.nextMissingStep.label + ".";
+          } else {
+            record.patient = mergeParsedPatient(record.patient, parsePatientTranscript(record.transcript));
+            record.statusMessage = "Recording captured, but no structured fields were detected. Please type or retry this step.";
+          }
+        }
 
         if (latest.llm_response) {
           record.patient.additionalInfo = latest.llm_response;
+          record.intakeEntries.additionalInfo = latest.llm_response;
+          record.transcript = buildTranscriptFromIntake(record) || record.transcript;
           record.statusMessage = "Vitals captured. Review the transcript below.";
           state.lastHandledAt = latest.created_at;
           state.pendingRecordingTarget = null;
           renderMicButtons("idle");
         } else {
-          // LLM still processing — don't stamp lastHandledAt yet, keep polling
-          record.statusMessage = "Transcript captured. Generating AI summary\u2026";
-          state.lastHandledAt = null;
+          state.pendingRecordingTarget = null;
+          renderMicButtons("idle");
         }
         renderVitalsView();
         renderPatientInfo();
@@ -1921,12 +2128,17 @@
 
   document.getElementById("confirm-vitals-button").addEventListener("click", function () {
     const record = getProtocolRecord(state.selectedProtocol);
-    record.transcript = transcriptPreview.value;
-    const prevAdditionalInfo = record.patient.additionalInfo;
-    record.patient = parsePatientTranscript(record.transcript);
-    if (prevAdditionalInfo && prevAdditionalInfo !== "N/A") {
-      record.patient.additionalInfo = prevAdditionalInfo;
-    }
+    const consolidatedTranscript = buildTranscriptFromIntake(record);
+    record.transcript = consolidatedTranscript || transcriptPreview.value;
+
+    // use intake entries directly, don't re-parse transcript
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = String(record.intakeEntries[step.key] || "").trim();
+      if (value && value !== "N/A") {
+        record.patient[step.key] = value;
+      }
+    });
+
     renderPatientInfo();
     navigateTo("patient");
   });
@@ -1974,6 +2186,104 @@
       toggleRecording(state.selectedProtocol);
     }
   });
+
+  intakeSaveStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    const capturedStep = getCurrentIntakeStep(record);
+    const saved = applyIntakeStepFromText(record, intakeStepInput.value);
+    if (saved) {
+      record.statusMessage = "Saved for " + capturedStep.label + ". Continue with the next vital.";
+      transcriptPreview.value = buildTranscriptFromIntake(record);
+      renderVitalsView();
+    }
+  });
+
+  intakePrevStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    if (record.intakeStepIndex > 0) {
+      record.intakeStepIndex -= 1;
+      renderVitalsView();
+    }
+  });
+
+  intakeNextStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    if (record.intakeStepIndex < VITAL_INTAKE_STEPS.length - 1) {
+      record.intakeStepIndex += 1;
+      renderVitalsView();
+    }
+  });
+
+  intakeStepInput.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    intakeSaveStepButton.click();
+  });
+
+  intakeStepMicButton.addEventListener("click", function () {
+    // toggleRecording(state.selectedProtocol);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      voiceStatusMessage.textContent = "Speech recognition not supported in this browser. Please use the text input instead.";
+      return;
+    }
+
+    if (intakeStepMicButton.classList.contains("intake-step-mic-button--recording")) {
+      return;
+    }
+
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-US";
+
+    intakeStepMicButton.classList.add("intake-step-mic-button--recording");
+    intakeStepMicButton.innerHTML = '<i class="fa-solid fa-stop"></i>';
+    voiceStatusMessage.textContent = "Listening for " + getCurrentIntakeStep(getProtocolRecord(state.selectedProtocol)).label + "...";
+
+    rec.onresult = function (event) {
+      const transcript = event.results[0][0].transcript;
+      intakeStepInput.value = transcript;
+
+      // also append to the main transcript preview so it stays as an audit log
+      const record = getProtocolRecord(state.selectedProtocol);
+      const stepLabel = getCurrentIntakeStep(record).label;
+      voiceStatusMessage.textContent = "Heard: \"" + transcript + "\" — saving " + stepLabel + ".";
+
+      intakeSaveStepButton.click();
+    };
+
+    rec.onerror = function (event) {
+      voiceStatusMessage.textContent = "Could not hear anything. Please try again.";
+      intakeStepMicButton.classList.remove("intake-step-mic-button--recording");
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    };
+
+    rec.onend = function () {
+      intakeStepMicButton.classList.remove("intake-step-mic-button--recording");
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    };
+
+    rec.start();
+  });
+
+  transcriptToggle.addEventListener("click", function () {
+    const isOpen = transcriptToggle.classList.toggle("transcript-toggle--open");
+    transcriptPreview.classList.toggle("is-hidden", !isOpen);
+    transcriptToggle.querySelector("span").textContent = isOpen ? "Hide transcript" : "View transcript";
+  });
+
   voiceScreenButton.addEventListener("click", function () {
     toggleRecording("voice");
   });
@@ -2295,7 +2605,10 @@
 
   additionalInfo.addEventListener("change", function () {
     if (isProtocolTarget(state.selectedProtocol)) {
-      getProtocolRecord(state.selectedProtocol).patient.additionalInfo = additionalInfo.value;
+      const record = getProtocolRecord(state.selectedProtocol);
+      record.patient.additionalInfo = additionalInfo.value;
+      record.intakeEntries.additionalInfo = additionalInfo.value;
+      record.transcript = buildTranscriptFromIntake(record) || record.transcript;
     }
   });
 
@@ -2317,6 +2630,22 @@
       state.currentScreen = "home";
     }
     showScreen(state.currentScreen);
-    ensureSyncLoops();
+    function isUserTyping() {
+      return document.activeElement === intakeStepInput ||
+        document.activeElement === additionalInfo ||
+        document.activeElement === transcriptPreview ||
+        document.activeElement === voiceTextInput;
+    }
+    if (!syncLoopsStarted) {
+      syncLoopsStarted = true;
+      syncRecordingStatus();
+      syncLatestResult();
+      window.setInterval(function () {
+        if (!isUserTyping()) syncRecordingStatus();
+      }, 1500);
+      window.setInterval(function () {
+        if (!isUserTyping()) syncLatestResult();
+      }, 1500);
+    }
   }
 })();

@@ -97,8 +97,10 @@ figure {
 
 .phone-notch {
   width: 122px;
-  height: 18px;
+  height: 28px;
   margin: 12px auto 0;
+  align-self: center;
+  flex-shrink: 0;
   border: 2px solid var(--line);
   border-radius: 999px;
   position: relative;
@@ -129,6 +131,7 @@ figure {
 
 .screen {
   display: none;
+  flex: 1;
   min-height: calc(100% - 30px);
   max-height: calc(100% - 30px);
   overflow-y: auto;
@@ -137,15 +140,15 @@ figure {
 }
 
 .screen--active {
-  display: block;
+  display: flex;
+  flex-direction: column;
 }
 
 .screen-header {
   display: grid;
   grid-template-columns: 42px 1fr 42px;
-  align-items: center;
+  align-items: start;
   gap: 10px;
-  padding: 6px 0 4px;
 }
 
 .screen-header--home {
@@ -198,11 +201,13 @@ figure {
 }
 
 .screen-title {
-  font-size: 28px;
-  font-weight: 800;
+  font-size: 32px;
   line-height: 1.1;
-  color: var(--ink);
   text-transform: uppercase;
+}
+
+#screen-home .screen-title {
+  text-transform: none;
 }
 
 .screen-subtitle,
@@ -366,6 +371,8 @@ figure {
   flex-direction: column;
   overflow: hidden;
   padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  height: 100%;
+  padding-top: 8px;
 }
 
 .calculator-display {
@@ -397,6 +404,109 @@ figure {
   padding-left: 18px;
 }
 
+.intake-card {
+  margin-top: 18px;
+}
+
+.intake-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intake-card__prompt {
+  margin-top: 10px;
+}
+
+.intake-card__actions {
+  margin-top: 12px;
+}
+
+.intake-nav-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.intake-action-button {
+  width: 100%;
+  font-size: 14px;
+  min-width: 0;
+  background: #f3f8fd;
+}
+
+.intake-summary {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.intake-summary__row {
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.intake-summary__value {
+  font-size: 13px;
+}
+
+.intake-summary__value--pending {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.intake-step-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.intake-step-input-row .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.intake-step-mic-button {
+  flex-shrink: 0;
+}
+
+.intake-step-mic-button--recording {
+  border-color: #c53030 !important;
+  background: #fff5f5 !important;
+  color: #c53030 !important;
+}
+
+.transcript-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--soft-line);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.transcript-toggle i {
+  transition: transform 0.2s;
+}
+
+.transcript-toggle--open i {
+  transform: rotate(180deg);
+}
+
 .footer-action {
   display: flex;
   justify-content: flex-end;
@@ -419,6 +529,23 @@ figure {
   margin-right: 8px;
 }
 
+/* Primary action buttons: Vitals confirm, Patient Start Assessment, Finish session buttons */
+#confirm-vitals-button,
+#start-assessment-button {
+  background: #56a0dc;
+  border-color: #87b9e4;
+  color: #ffffff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.12);
+}
+
+/* Slightly darker on dark theme for contrast */
+body.theme-dark #confirm-vitals-button,
+body.theme-dark #start-assessment-button {
+  background: #2b6ea3;
+  border-color: #2b6ea3;
+  color: #ffffff;
+}
+
 .summary-row {
   display: flex;
   justify-content: space-between;
@@ -435,7 +562,7 @@ figure {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  min-height: 120px;
+  min-height: 50px;
   display: block;
   box-sizing: border-box;
 }
@@ -517,9 +644,9 @@ figure {
 }
 
 .step-card--complete .step-number {
-  background: #bee3f8;
-  border-color: #bee3f8;
-  color: #2b6cb0;
+  background: #2f855a;
+  border-color: #2f855a;
+  color: #ffffff;
 }
 
 .step-body {
@@ -541,8 +668,8 @@ figure {
 }
 
 .step-card--complete .step-body {
-  border-color: #bee3f8;
-  background: #ebf4ff;
+  border-color: #2f855a;
+  background: #edf8f1;
 }
 
 body.theme-dark .step-card--complete .step-body {
@@ -554,7 +681,7 @@ body.theme-dark .step-card--complete .step-body {
 }
 
 .steps-footer {
-  margin-top: 22px;
+  margin-top: 0px;
   padding-bottom: 18px;
 }
 
@@ -567,8 +694,9 @@ body.theme-dark .step-card--complete .step-body {
 .chat-feed {
   display: grid;
   gap: 12px;
-  margin-top: 22px;
+  margin-top: 10px;
   flex: 1;
+  min-height: 0;
   align-content: start;
   overflow-y: auto;
   padding-right: 4px;
@@ -763,7 +891,8 @@ body.theme-dark .voice-debug-hit {
   gap: 10px;
   margin-top: 16px;
   width: 100%;
-  padding: 14px 0 10px;
+  flex-shrink: 0;
+  padding: 14px 0 6px;
   background: linear-gradient(180deg, rgba(241, 248, 255, 0) 0%, rgba(241, 248, 255, 0.96) 24%, rgba(241, 248, 255, 1) 100%);
 }
 
@@ -793,7 +922,7 @@ body.theme-dark .chat-input-bar {
   display: flex;
   justify-content: center;
   width: 100%;
-  padding: 6px 0 0;
+  padding: 0 0 14px;
   background: linear-gradient(180deg, rgba(241, 248, 255, 1) 0%, rgba(241, 248, 255, 0.98) 100%);
   flex-shrink: 0;
 }
@@ -1657,7 +1786,7 @@ body.theme-dark .team-member--active {
    HOME DASHBOARD
 ═══════════════════════════════════════════ */
 #screen-home.screen--active {
-  padding: 14px 16px 20px;
+  padding: 14px 22px calc(88px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1679,6 +1808,7 @@ body.theme-dark .team-member--active {
   gap: 10px;
 }
 
+
 .home-logo-icon {
   width: 38px;
   height: 38px;
@@ -1697,6 +1827,8 @@ body.theme-dark .team-member--active {
 }
 
 .home-title {
+  flex: 1;
+  text-align: center;
   font-size: 28px;
   font-weight: 800;
   color: var(--ink);
@@ -2058,11 +2190,15 @@ body.theme-dark .team-member--active {
   display: none;
 }
 
-.home-copyright {
+.screen-copyright {
   text-align: center;
   font-size: 11px;
   color: var(--muted);
-  margin-top: 4px;
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 28px;
+  padding-bottom: 0;
 }
 
 /* ═══════════════════════════════════════════
@@ -2073,19 +2209,23 @@ body.theme-dark .team-member--active {
 ═══════════════════════════════════════════ */
 .calc-condition-bar {
   display: flex;
-  gap: 8px;
-  padding: 12px 14px 8px;
+  gap: 6px;
+  padding: 10px 12px 6px;
   flex-shrink: 0;
+}
+
+#screen-calculator.screen--active {
+  overflow-y: auto;
 }
 
 .calc-cond-btn {
   flex: 1;
-  padding: 9px 4px;
+  padding: 8px 4px;
   border-radius: 20px;
   border: 1.5px solid var(--soft-line);
   background: var(--surface);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
@@ -2098,12 +2238,13 @@ body.theme-dark .team-member--active {
 }
 
 .calc-scroll-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 14px 24px;
+  flex: none;
+  overflow: visible;
+  min-height: auto;
+  padding: 8px 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 /* Simple calculator card */
@@ -2111,20 +2252,20 @@ body.theme-dark .team-member--active {
   background: var(--surface);
   border: 1.5px solid var(--soft-line);
   border-radius: 14px;
-  padding: 20px 16px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .calc-simple-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .calc-simple-label {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--ink);
 }
@@ -2140,12 +2281,12 @@ body.theme-dark .team-member--active {
 
 .calc-simple-input {
   flex: 1;
-  padding: 14px 12px;
+  padding: 12px 10px;
   border: 1.5px solid var(--soft-line);
   border-radius: 10px;
   background: var(--surface);
   color: var(--ink);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   min-width: 0;
 }
@@ -2161,12 +2302,12 @@ body.theme-dark .team-member--active {
 }
 
 .calc-simple-unit {
-  padding: 0 12px;
+  padding: 0 10px;
   border: none;
   border-left: 1.5px solid var(--soft-line);
   background: var(--surface-alt);
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   appearance: auto;
@@ -2174,18 +2315,18 @@ body.theme-dark .team-member--active {
 
 .calc-simple-btn {
   width: 100%;
-  padding: 16px;
+  padding: 13px;
   background: #2b6cb0;
   color: #fff;
   border: none;
   border-radius: 12px;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 800;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   transition: background 0.15s;
 }
 
@@ -2198,8 +2339,8 @@ body.theme-dark .team-member--active {
   background: #ebf4ff;
   border: 1.5px solid #bee3f8;
   border-radius: 12px;
-  padding: 16px;
-  font-size: 18px;
+  padding: 13px;
+  font-size: 16px;
   font-weight: 700;
   color: #2b6cb0;
   text-align: center;
@@ -2209,11 +2350,11 @@ body.theme-dark .team-member--active {
   text-align: left;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .calc-result-label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
@@ -2224,13 +2365,13 @@ body.theme-dark .team-member--active {
 }
 
 .calc-result-value {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 800;
   color: #2b6cb0;
 }
 
 .calc-result-sub {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   font-weight: 500;
 }
@@ -2238,7 +2379,7 @@ body.theme-dark .team-member--active {
 #calc-results-cardiac {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* Vasopressor note */
@@ -2246,14 +2387,14 @@ body.theme-dark .team-member--active {
   background: #ebf4ff;
   border: 1.5px solid #bee3f8;
   border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 13px;
+  padding: 10px 12px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ink);
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  line-height: 1.4;
+  gap: 6px;
+  line-height: 1.35;
 }
 
 .calc-pressor-note i {
@@ -2266,7 +2407,7 @@ body.theme-dark .team-member--active {
 /* Handheld calculator */
 .hh-calc {
   background: var(--surface);
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
   border: 1.5px solid var(--line);
   border-bottom: 3px solid var(--line);
@@ -2275,11 +2416,11 @@ body.theme-dark .team-member--active {
 .hh-calc__display {
   background: #ebf4ff;
   color: var(--ink);
-  font-size: 36px;
+  font-size: 30px;
   font-weight: 600;
   text-align: right;
-  padding: 18px 20px 14px;
-  min-height: 64px;
+  padding: 14px 16px 10px;
+  min-height: 52px;
   word-break: break-all;
   letter-spacing: -0.5px;
   border-bottom: 1.5px solid var(--soft-line);
@@ -2293,11 +2434,11 @@ body.theme-dark .team-member--active {
 }
 
 .hh-key {
-  padding: 18px 0;
+  padding: 14px 0;
   border: none;
   background: var(--surface);
   color: var(--ink);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.1s;
@@ -2308,7 +2449,7 @@ body.theme-dark .team-member--active {
 .hh-key--fn {
   background: #ffffff;
   color: #2b6cb0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -2317,7 +2458,7 @@ body.theme-dark .team-member--active {
 .hh-key--op {
   background: #ffffff;
   color: #2b6cb0;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -2326,24 +2467,24 @@ body.theme-dark .team-member--active {
 .hh-key--zero {
   grid-column: span 2;
   text-align: left;
-  padding-left: 22px;
+  padding-left: 18px;
 }
 
 .hh-key--eq {
   background: #2b6cb0;
   color: #fff;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
 }
 
 .hh-key--eq:active { background: #1e4f8a; }
 
 .calc-footer-note {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   text-align: center;
-  padding: 4px 0 8px;
-  line-height: 1.4;
+  padding: 2px 0 4px;
+  line-height: 1.3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2530,8 +2671,9 @@ body.theme-dark .team-member--active {
 .bottom-nav {
   position: sticky;
   bottom: 0;
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, var(--surface) 100%);
   border-top: 1px solid var(--soft-line);
+  box-shadow: 0 -8px 18px rgba(72, 133, 186, 0.08);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -2554,7 +2696,7 @@ body.theme-dark .team-member--active {
   font-weight: 600;
   letter-spacing: 0.04em;
   border-radius: 12px;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
 .bottom-nav__btn i {
@@ -2630,4 +2772,17 @@ body.theme-dark .team-member--active {
   min-height: 48px;
   padding: 9px 14px;
   font-size: 16px;
+}
+
+.bottom-nav__btn--active {
+  box-shadow: inset 0 0 0 1px rgba(43, 108, 176, 0.16), 0 4px 10px rgba(72, 133, 186, 0.12);
+}
+
+body.theme-dark .bottom-nav {
+  background: linear-gradient(180deg, rgba(33, 69, 98, 0.96) 0%, var(--surface) 100%);
+  box-shadow: 0 -8px 18px rgba(0, 0, 0, 0.22);
+}
+
+body.theme-dark .bottom-nav__btn--active {
+  box-shadow: inset 0 0 0 1px rgba(189, 213, 233, 0.14), 0 4px 12px rgba(0, 0, 0, 0.22);
 }
