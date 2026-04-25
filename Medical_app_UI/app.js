@@ -9,9 +9,11 @@
     pipelineText: "http://localhost:8000/pipeline/text",
     pipelineSteps: "http://localhost:8000/pipeline/steps",
     latestAudio: "http://localhost:8000/responses/latest/audio/mp3",
+    toggleSttOnly: "http://localhost:8000/recording/toggle?stt_only=true",
     authLogin: "http://localhost:8000/auth/login",
     authRegister: "http://localhost:8000/auth/register",
-    authLogout: "http://localhost:8000/auth/logout"
+    authLogout: "http://localhost:8000/auth/logout",
+    authMe: "http://localhost:8000/auth/me"
   };
 
   const protocols = {
@@ -225,6 +227,8 @@
     activeAudio: null,
     lastHandledAt: null,
     pendingRecordingTarget: null,
+    pendingProtocolMicSource: null,
+    caseHistory: [],
     protocolData: {
       "Sepsis": createBlankProtocolRecord(),
       "Septic Shock": createBlankProtocolRecord()
@@ -293,6 +297,7 @@
         selectedProtocol: state.selectedProtocol,
         lastHandledAt: state.lastHandledAt,
         protocolData: state.protocolData,
+        caseHistory: state.caseHistory,
         chatData: state.chatData,
         settings: state.settings
       }));
@@ -318,6 +323,18 @@
       state.selectedProtocol = typeof saved.selectedProtocol === "string" ? saved.selectedProtocol : "";
       state.lastHandledAt = typeof saved.lastHandledAt === "string" ? saved.lastHandledAt : null;
       state.protocolData = sanitizeProtocolData(saved.protocolData);
+      state.caseHistory = Array.isArray(saved.caseHistory)
+        ? saved.caseHistory.filter(function (entry) {
+            return entry && typeof entry === "object" && typeof entry.protocol === "string";
+          }).map(function (entry) {
+            return {
+              protocol: entry.protocol,
+              finishedAt: typeof entry.finishedAt === "number" ? entry.finishedAt : Date.now(),
+              completedSteps: Number.isFinite(Number(entry.completedSteps)) ? Number(entry.completedSteps) : 0,
+              totalSteps: Number.isFinite(Number(entry.totalSteps)) ? Number(entry.totalSteps) : 0
+            };
+          }).slice(0, 8)
+        : [];
       state.chatData = {
         summary: saved.chatData && typeof saved.chatData.summary === "string" ? saved.chatData.summary : "",
         response: saved.chatData && typeof saved.chatData.response === "string"
@@ -418,15 +435,25 @@
 
   function loadProfileForCurrentUser() {
     var storageKey = getProfileStorageKey();
+    var accountName = state.auth && state.auth.user && state.auth.user.full_name
+      ? String(state.auth.user.full_name).trim()
+      : "";
     if (!storageKey) {
-      applyProfileToUi(null);
+      applyProfileToUi({ name: accountName });
       return;
     }
     try {
       var saved = JSON.parse(localStorage.getItem(storageKey) || "null");
-      applyProfileToUi(saved);
+      if (saved && typeof saved === "object") {
+        if (!saved.name && accountName) {
+          saved.name = accountName;
+        }
+        applyProfileToUi(saved);
+      } else {
+        applyProfileToUi({ name: accountName });
+      }
     } catch (e) {
-      applyProfileToUi(null);
+      applyProfileToUi({ name: accountName });
     }
   }
 
@@ -547,6 +574,33 @@
     button.disabled = false;
   }
 
+  function setStepMicButtonState(state) {
+    if (!intakeStepMicButton) {
+      return;
+    }
+    if (state === "recording") {
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-stop"></i>';
+      intakeStepMicButton.setAttribute("aria-label", "Stop step recording");
+      intakeStepMicButton.classList.add("voice-pad--recording");
+      intakeStepMicButton.classList.remove("voice-pad--working");
+      intakeStepMicButton.disabled = false;
+      return;
+    }
+    if (state === "transcribing") {
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-wave-square"></i>';
+      intakeStepMicButton.setAttribute("aria-label", "Step audio transcribing");
+      intakeStepMicButton.classList.remove("voice-pad--recording");
+      intakeStepMicButton.classList.add("voice-pad--working");
+      intakeStepMicButton.disabled = true;
+      return;
+    }
+    intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    intakeStepMicButton.setAttribute("aria-label", "Record this step");
+    intakeStepMicButton.classList.remove("voice-pad--recording");
+    intakeStepMicButton.classList.remove("voice-pad--working");
+    intakeStepMicButton.disabled = false;
+  }
+
   function renderMicThresholdTester(level) {
     const threshold = state.settings.micThreshold;
     const safeLevel = Number.isFinite(level) ? Math.max(0, Math.min(100, level)) : 0;
@@ -643,6 +697,9 @@
       button.setAttribute("aria-current", isActive ? "page" : "false");
     });
     state.currentScreen = name;
+    if (name === "profile") {
+      loadProfileForCurrentUser();
+    }
     if (screens[name]) {
       screens[name].scrollTop = 0;
     }
@@ -657,7 +714,28 @@
   }
 
   function getProtocolRecord(protocolName) {
-    return state.protocolData[protocolName] || state.protocolData.Sepsis;
+    var normalized = typeof protocolName === "string" ? protocolName.trim() : "";
+    if (normalized && state.protocolData[normalized]) {
+      return state.protocolData[normalized];
+    }
+    if (state.selectedProtocol && state.protocolData[state.selectedProtocol]) {
+      return state.protocolData[state.selectedProtocol];
+    }
+    return state.protocolData.Sepsis;
+  }
+
+  function startFreshProtocolCase(protocolName) {
+    if (!isProtocolTarget(protocolName)) {
+      return;
+    }
+    state.selectedProtocol = protocolName;
+    state.protocolData[protocolName] = createBlankProtocolRecord();
+    state.stepCompletion = [];
+    state.teamAssignments = [];
+    state.protocolStartTime = null;
+    state.pendingRecordingTarget = null;
+    state.pendingProtocolMicSource = null;
+    state.lastHandledAt = null;
   }
 
   function appendChatMessage(role, text) {
@@ -773,6 +851,7 @@
     state.chatData.debugSnapshot = createBlankDebugSnapshot();
     state.lastHandledAt = null;
     state.pendingRecordingTarget = null;
+    state.pendingProtocolMicSource = null;
     if (state.activeAudio) {
       state.activeAudio.pause();
       state.activeAudio = null;
@@ -783,7 +862,10 @@
 
   function renderMicButtons(uiState) {
     const target = state.pendingRecordingTarget;
-    setMicButtonState(vitalsVoiceButton, isProtocolTarget(target) ? uiState : "idle");
+    const protocolState = isProtocolTarget(target) ? uiState : "idle";
+    const isStepMicActive = state.pendingProtocolMicSource === "step";
+    setMicButtonState(vitalsVoiceButton, isStepMicActive ? "idle" : protocolState);
+    setStepMicButtonState(isStepMicActive ? protocolState : "idle");
     setMicButtonState(voiceScreenButton, target === "voice" ? uiState : "idle");
   }
 
@@ -1544,8 +1626,12 @@
       /weighs?/,
     ];
     var segments = text.split(/[.,]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 4; });
+    var labeledFieldPrefix = /^(?:age|weight|heart rate|hr|blood pressure|bp|temperature|temp|respiratory rate|respiration rate|rr|oxygen saturation|spo2|sp o2|fio2|fi o2|respiratory support|additional info)\s*:/i;
     var notesSegments = segments.filter(function(seg) {
       var segLower = seg.toLowerCase();
+      if (labeledFieldPrefix.test(seg)) {
+        return false;
+      }
       return !vitalSegmentPatterns.some(function(p) { return p.test(segLower); });
     });
     if (notesSegments.length) {
@@ -1738,9 +1824,9 @@
   async function toggleRecording(target) {
     try {
       state.pendingRecordingTarget = target;
-      const result = await fetchJson(API.toggle, { method: "POST" }, true);
+      const toggleUrl = isProtocolTarget(target) ? API.toggleSttOnly : API.toggle;
+      const result = await fetchJson(toggleUrl, { method: "POST" }, true);
       if (result.state === "recording_started") {
-        startLiveTranscript(target);
         renderMicButtons("recording");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
@@ -1751,7 +1837,6 @@
         }
       }
       if (result.state === "transcribing") {
-        stopLiveTranscript();
         renderMicButtons("transcribing");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "Recording stopped. Transcribing and extracting vitals now.";
@@ -1771,8 +1856,8 @@
         }
       }
       if (result.state === "no_audio") {
-        stopLiveTranscript();
         state.pendingRecordingTarget = null;
+        state.pendingProtocolMicSource = null;
         renderMicButtons("idle");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "No audio captured. Please try again.";
@@ -1784,8 +1869,8 @@
       }
     } catch (error) {
       const failedTarget = target;
-      stopLiveTranscript();
       state.pendingRecordingTarget = null;
+      state.pendingProtocolMicSource = null;
       renderMicButtons("idle");
       if (isProtocolTarget(failedTarget)) {
         getProtocolRecord(failedTarget).statusMessage = error.message;
@@ -1871,6 +1956,7 @@
       } else if (isProtocolTarget(target)) {
         const record = getProtocolRecord(target);
         record.transcript = latest.text || "";
+        intakeStepInput.value = record.transcript;
         if (record.transcript) {
           const intakeResult = applyHybridIntakeFromTranscript(record, record.transcript);
           if (intakeResult.updatedCount > 1) {
@@ -1878,9 +1964,11 @@
           } else if (intakeResult.updatedCount === 1) {
             record.statusMessage = "Saved one field from recording. Next: " + intakeResult.nextMissingStep.label + ".";
           } else {
-            record.patient = mergeParsedPatient(record.patient, parsePatientTranscript(record.transcript));
+            const parsedFromTranscript = parsePatientTranscript(record.transcript);
+            record.patient = mergeParsedPatient(record.patient, parsedFromTranscript);
             record.statusMessage = "Recording captured, but no structured fields were detected. Please type or retry this step.";
           }
+          record.transcript = buildTranscriptFromIntake(record) || record.transcript;
         }
 
         if (latest.llm_response) {
@@ -1890,9 +1978,11 @@
           record.statusMessage = "Vitals captured. Review the transcript below.";
           state.lastHandledAt = latest.created_at;
           state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
           renderMicButtons("idle");
         } else {
           state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
           renderMicButtons("idle");
         }
         renderVitalsView();
@@ -1901,6 +1991,7 @@
       }
 
       state.pendingRecordingTarget = null;
+      state.pendingProtocolMicSource = null;
       renderMicButtons("idle");
     } catch (error) {
       if (!/No transcription has been published yet/i.test(error.message)) {
@@ -2075,19 +2166,26 @@
     var caseMetaEl   = document.getElementById("home-case-meta");
     var caseBadgeEl  = document.getElementById("home-case-badge");
     var continueBtn  = document.getElementById("home-continue-button");
-    if (latestProtocol) {
+    var hasActiveCase = isProtocolTarget(state.selectedProtocol);
+    if (hasActiveCase) {
+      var activeProtocol = state.selectedProtocol;
       var completed = state.stepCompletion.filter(Boolean).length;
       var total     = state.stepCompletion.length;
-      if (caseTitleEl) caseTitleEl.textContent = "Probable " + latestProtocol;
+      if (caseTitleEl) caseTitleEl.textContent = "Probable " + activeProtocol;
       if (caseMetaEl)  caseMetaEl.textContent  = total > 0
         ? completed + " of " + total + " steps completed · Tap to resume"
         : "Vitals captured — tap to start steps";
-      if (caseBadgeEl) caseBadgeEl.textContent = latestProtocol === "Septic Shock" ? "Critical" : "Active";
+      if (caseBadgeEl) caseBadgeEl.textContent = activeProtocol === "Septic Shock" ? "Critical" : "Active";
       if (continueBtn) continueBtn.style.display = "";
     } else {
-      if (caseTitleEl) caseTitleEl.textContent = "No active case";
-      if (caseMetaEl)  caseMetaEl.textContent  = "Select an emergency below to begin";
-      if (caseBadgeEl) caseBadgeEl.textContent = "";
+      var latestFinished = state.caseHistory && state.caseHistory.length ? state.caseHistory[0] : null;
+      if (caseTitleEl) caseTitleEl.textContent = latestFinished ? "No active case" : "No active case";
+      if (caseMetaEl) {
+        caseMetaEl.textContent = latestFinished
+          ? ("Last finished: " + latestFinished.protocol + " · " + new Date(latestFinished.finishedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+          : "Select an emergency below to begin";
+      }
+      if (caseBadgeEl) caseBadgeEl.textContent = latestFinished ? "Completed" : "";
       if (continueBtn) continueBtn.style.display = "none";
     }
   }
@@ -2103,7 +2201,11 @@
   document.querySelectorAll(".home-emg-card[data-protocol]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var protocol = btn.dataset.protocol;
-      state.selectedProtocol = protocol;
+      if (isProtocolTarget(protocol)) {
+        startFreshProtocolCase(protocol);
+      } else {
+        state.selectedProtocol = protocol;
+      }
       if (protocol === "Cardiac Arrest") {
         renderSteps();
         navigateTo("steps");
@@ -2162,8 +2264,7 @@
       console.log("[Steps] Parsed steps:", llmSteps);
       if (llmSteps && llmSteps.length > 0) {
         var protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
-        var preCompleted = detectCompletedSteps(patient, llmSteps);
-        console.log("[Steps] Pre-completed:", preCompleted);
+        var preCompleted = null;
         _currentStepsRef = llmSteps;
         renderStepsFromData(protocol.title, "Immediate - within 3 hours", llmSteps, preCompleted);
       } else {
@@ -2178,11 +2279,29 @@
   });
 
   finishStepsButton.addEventListener("click", function () {
+    if (isProtocolTarget(state.selectedProtocol)) {
+      state.caseHistory.unshift({
+        protocol: state.selectedProtocol,
+        finishedAt: Date.now(),
+        completedSteps: state.stepCompletion.filter(Boolean).length,
+        totalSteps: state.stepCompletion.length
+      });
+      state.caseHistory = state.caseHistory.slice(0, 8);
+    }
+    if (isProtocolTarget(state.selectedProtocol)) {
+      state.protocolData[state.selectedProtocol] = createBlankProtocolRecord();
+    }
+    state.selectedProtocol = "";
+    state.stepCompletion = [];
+    state.teamAssignments = [];
+    state.protocolStartTime = null;
     navigateTo("home");
+    refreshHomeDashboard();
   });
 
   vitalsVoiceButton.addEventListener("click", function () {
     if (isProtocolTarget(state.selectedProtocol)) {
+      state.pendingProtocolMicSource = "top";
       toggleRecording(state.selectedProtocol);
     }
   });
@@ -2232,50 +2351,8 @@
   });
 
   intakeStepMicButton.addEventListener("click", function () {
-    // toggleRecording(state.selectedProtocol);
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      voiceStatusMessage.textContent = "Speech recognition not supported in this browser. Please use the text input instead.";
-      return;
-    }
-
-    if (intakeStepMicButton.classList.contains("intake-step-mic-button--recording")) {
-      return;
-    }
-
-    const rec = new SpeechRecognition();
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = "en-US";
-
-    intakeStepMicButton.classList.add("intake-step-mic-button--recording");
-    intakeStepMicButton.innerHTML = '<i class="fa-solid fa-stop"></i>';
-    voiceStatusMessage.textContent = "Listening for " + getCurrentIntakeStep(getProtocolRecord(state.selectedProtocol)).label + "...";
-
-    rec.onresult = function (event) {
-      const transcript = event.results[0][0].transcript;
-      intakeStepInput.value = transcript;
-
-      // also append to the main transcript preview so it stays as an audit log
-      const record = getProtocolRecord(state.selectedProtocol);
-      const stepLabel = getCurrentIntakeStep(record).label;
-      voiceStatusMessage.textContent = "Heard: \"" + transcript + "\" — saving " + stepLabel + ".";
-
-      intakeSaveStepButton.click();
-    };
-
-    rec.onerror = function (event) {
-      voiceStatusMessage.textContent = "Could not hear anything. Please try again.";
-      intakeStepMicButton.classList.remove("intake-step-mic-button--recording");
-      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-    };
-
-    rec.onend = function () {
-      intakeStepMicButton.classList.remove("intake-step-mic-button--recording");
-      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
-    };
-
-    rec.start();
+    state.pendingProtocolMicSource = "step";
+    toggleRecording(state.selectedProtocol);
   });
 
   transcriptToggle.addEventListener("click", function () {
@@ -2557,7 +2634,7 @@
   }());
 
   // Profile save
-  document.getElementById("profile-save-btn").addEventListener("click", function () {
+  document.getElementById("profile-save-btn").addEventListener("click", async function () {
     var name = document.getElementById("profile-name-input").value.trim();
     var role = document.getElementById("profile-role-input").value.trim();
     var nameDisplay = document.getElementById("profile-name-display");
@@ -2575,14 +2652,27 @@
         }));
       }
     } catch(e) {}
+    try {
+      if (isAuthenticated()) {
+        var updatedUser = await fetchJson(
+          API.authMe,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ full_name: name || null })
+          },
+          true
+        );
+        state.auth.user = updatedUser;
+        saveAuthSession();
+      }
+    } catch (e) {}
     navigateTo("home");
   });
 
   profileLogoutButton.addEventListener("click", function () {
     performLogout();
   });
-
-  loadProfileForCurrentUser();
 
   textSizeSlider.addEventListener("input", function (event) {
     applyTextScale(Number(event.target.value));
@@ -2613,6 +2703,7 @@
   });
 
   restoreAuthSession();
+  loadProfileForCurrentUser();
   restoreState();
   setAuthMode("login");
   renderPatientInfo();

@@ -193,7 +193,7 @@ http://localhost:8000
 
 Frontend modes:
 - mobile UI (primary): `Medical_app_UI/index.html` with `app.js` and `app.css`
-- react UI (secondary): `Medical_app_UI/react.html` with `src/` React code
+- react/web UI: `Medical_app_UI/react.html` with `src/` React code
 - both modes call the same backend auth routes
 
 Mobile UI auth notes:
