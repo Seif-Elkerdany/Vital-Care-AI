@@ -316,6 +316,171 @@ Cultures drawn</textarea>
           <div class="footer-action">
             <button class="action-button" type="button" id="profile-save-btn">Save Profile</button>
           </div>
+
+          <div class="profile-action-grid">
+            <button class="profile-action-card" type="button" data-screen-target="login">
+              <i class="fa-solid fa-right-to-bracket"></i>
+              <span>
+                <strong>Login</strong>
+                <small id="profile-login-status">Not signed in</small>
+              </span>
+            </button>
+            <button class="profile-action-card" type="button" data-screen-target="admin">
+              <i class="fa-solid fa-user-shield"></i>
+              <span>
+                <strong>System Admin</strong>
+                <small>Manage access and app defaults</small>
+              </span>
+            </button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-login">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">Login</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <div class="profile-avatar-row">
+            <div class="profile-avatar">
+              <i class="fa-solid fa-lock"></i>
+            </div>
+            <div class="profile-info">
+              <div class="profile-name" id="login-name-display">Vital Care AI</div>
+              <div class="profile-role" id="login-role-display">Clinical workspace access</div>
+            </div>
+          </div>
+
+          <div class="settings-list">
+            <label class="settings-field-row">
+              <span class="settings-field-label">Email</span>
+              <input class="text-input settings-field-input" type="email" id="login-email-input" placeholder="clinician@hospital.org" autocomplete="email" />
+            </label>
+            <label class="settings-field-row">
+              <span class="settings-field-label">Password</span>
+              <input class="text-input settings-field-input" type="password" id="login-password-input" placeholder="Password" autocomplete="current-password" />
+            </label>
+            <label class="toggle-row login-remember-row">
+              <span><i class="fa-solid fa-key"></i> Remember this device</span>
+              <input id="login-remember-toggle" type="checkbox" checked />
+            </label>
+          </div>
+
+          <div class="login-status-panel" id="login-status-message" aria-live="polite">Sign in to sync your profile and admin tools.</div>
+
+          <div class="footer-action footer-action--split">
+            <button class="ghost-button" type="button" id="login-signout-btn">Sign Out</button>
+            <button class="action-button" type="button" id="login-submit-btn">Sign In</button>
+          </div>
+        </section>
+
+        <section class="screen" id="screen-admin">
+          <header class="screen-header">
+            <button class="icon-button icon-button--back" type="button" data-back-button aria-label="Go back">
+              <i class="fa-solid fa-arrow-down"></i>
+            </button>
+            <div class="screen-header__title-group">
+              <h1 class="screen-title">System Admin</h1>
+            </div>
+            <div class="screen-header__spacer"></div>
+          </header>
+
+          <div class="profile-avatar-row">
+            <div class="profile-avatar profile-avatar--admin">
+              <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <div class="profile-info">
+              <div class="profile-name" id="admin-name-display">Admin Console</div>
+              <div class="profile-role" id="admin-access-display">Local configuration</div>
+            </div>
+          </div>
+
+          <section class="admin-metric-grid" aria-label="System summary">
+            <div class="admin-metric-card">
+              <span class="mini-label">Users</span>
+              <strong id="admin-users-count">12</strong>
+            </div>
+            <div class="admin-metric-card">
+              <span class="mini-label">Guidelines</span>
+              <strong>3</strong>
+            </div>
+            <div class="admin-metric-card">
+              <span class="mini-label">API</span>
+              <strong id="admin-api-status">Local</strong>
+            </div>
+          </section>
+
+          <section class="admin-guideline-panel" aria-labelledby="admin-guideline-title">
+            <div class="admin-guideline-panel__header">
+              <div>
+                <h2 class="card-title" id="admin-guideline-title">RAG Guidelines</h2>
+                <p class="section-copy">Upload a PDF to index it into the active RAG guideline collection.</p>
+              </div>
+              <button class="icon-button" type="button" id="admin-guideline-refresh-btn" aria-label="Refresh guidelines">
+                <i class="fa-solid fa-rotate"></i>
+              </button>
+            </div>
+
+            <label class="admin-upload-dropzone" for="admin-guideline-file">
+              <i class="fa-solid fa-file-pdf"></i>
+              <span>
+                <strong id="admin-guideline-file-name">Select PDF guideline</strong>
+                <small>PDF files only</small>
+              </span>
+            </label>
+            <input class="admin-upload-input" type="file" id="admin-guideline-file" accept="application/pdf,.pdf" />
+
+            <div class="footer-action footer-action--split admin-guideline-actions">
+              <button class="ghost-button" type="button" id="admin-guideline-clear-btn">Clear</button>
+              <button class="action-button" type="button" id="admin-guideline-upload-btn">Upload to RAG</button>
+            </div>
+
+            <div class="login-status-panel" id="admin-guideline-status" aria-live="polite">No PDF selected.</div>
+            <div class="admin-guideline-list" id="admin-guideline-list"></div>
+          </section>
+
+          <div class="settings-list admin-settings-list">
+            <label class="settings-field-row">
+              <span class="settings-field-label">Default Institution</span>
+              <input class="text-input settings-field-input" type="text" id="admin-institution-input" placeholder="Hospital or clinic name" />
+            </label>
+            <label class="select-row admin-select-row">
+              <span><i class="fa-solid fa-user-lock"></i> New User Role</span>
+              <select class="text-input" id="admin-role-select">
+                <option value="Clinician">Clinician</option>
+                <option value="Charge Nurse">Charge Nurse</option>
+                <option value="System Admin">System Admin</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <span><i class="fa-solid fa-notes-medical"></i> Require protocol review</span>
+              <input id="admin-protocol-review-toggle" type="checkbox" checked />
+            </label>
+            <label class="toggle-row">
+              <span><i class="fa-solid fa-shield-halved"></i> Audit voice requests</span>
+              <input id="admin-audit-toggle" type="checkbox" checked />
+            </label>
+          </div>
+
+          <section class="admin-user-list" aria-label="Recent administrators">
+            <div class="admin-user-row">
+              <span><strong>Dr. User</strong><small>Emergency Medicine</small></span>
+              <em>Owner</em>
+            </div>
+            <div class="admin-user-row">
+              <span><strong>Clinical Lead</strong><small>Protocol manager</small></span>
+              <em>Admin</em>
+            </div>
+          </section>
+
+          <div class="footer-action">
+            <button class="action-button" type="button" id="admin-save-btn">Save Admin Settings</button>
+          </div>
         </section>
 
         <section class="screen" id="screen-settings">
