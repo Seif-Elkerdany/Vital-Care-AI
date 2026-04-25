@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, MicOff, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { authFetch } from '../lib/authClient';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -9,12 +10,13 @@ interface Message {
 
 interface VoiceAssistantProps {
   onDataUpdate: (data: { patient?: any; vitals?: any }) => void;
+  accessToken: string;
 }
 
 const API = '/api';
 const POLL_INTERVAL_MS = 600;
 
-export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
+export function VoiceAssistant({ onDataUpdate, accessToken }: VoiceAssistantProps) {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -121,7 +123,7 @@ export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
   // ── Play TTS audio from backend ───────────────────────────────────────────
   const playBackendAudio = async () => {
     try {
-      const res = await fetch(`${API}/responses/latest/audio/mp3`);
+      const res = await authFetch('/responses/latest/audio/mp3', accessToken);
       if (!res.ok) return;
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -158,7 +160,7 @@ export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
 
       // Fetch LLM response
       try {
-        const res = await fetch(`${API}/transcriptions/latest`);
+        const res = await authFetch('/transcriptions/latest', accessToken);
         if (res.ok) {
           const data = await res.json();
           if (data.llm_response) {
@@ -181,7 +183,7 @@ export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
     stopPolling();
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`${API}/recording/status`);
+        const res = await authFetch('/recording/status', accessToken);
         if (!res.ok) return;
         const status = await res.json();
 
@@ -211,7 +213,7 @@ export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
   const toggleListening = async () => {
     setBackendError(null);
     try {
-      const res = await fetch(`${API}/recording/toggle`, { method: 'POST' });
+      const res = await authFetch('/recording/toggle', accessToken, { method: 'POST' });
       if (!res.ok) {
         setBackendError(`Backend returned ${res.status}`);
         return;
@@ -243,7 +245,7 @@ export function VoiceAssistant({ onDataUpdate }: VoiceAssistantProps) {
         stopPolling();
       }
     } catch {
-      setBackendError('Cannot reach backend at http://localhost:8000. Is the server running?');
+      setBackendError('Cannot reach backend. Check auth session and server connectivity.');
     }
   };
 
