@@ -1,5 +1,6 @@
 (function () {
   const STORAGE_KEY = "medapp-ui-state";
+  const AUTH_STORAGE_KEY = "medapp-auth-session";
   const API = {
     status: "http://localhost:8000/recording/status",
     toggle: "http://localhost:8000/recording/toggle",
@@ -7,7 +8,10 @@
     latestResponse: "http://localhost:8000/responses/latest",
     pipelineText: "http://localhost:8000/pipeline/text",
     pipelineSteps: "http://localhost:8000/pipeline/steps",
-    latestAudio: "http://localhost:8000/responses/latest/audio/mp3"
+    latestAudio: "http://localhost:8000/responses/latest/audio/mp3",
+    authLogin: "http://localhost:8000/auth/login",
+    authRegister: "http://localhost:8000/auth/register",
+    authLogout: "http://localhost:8000/auth/logout"
   };
 
   const protocols = {
@@ -84,6 +88,7 @@
   };
 
   const screens = {
+    auth: document.getElementById("screen-auth"),
     home: document.getElementById("screen-home"),
     vitals: document.getElementById("screen-vitals"),
     patient: document.getElementById("screen-patient"),
@@ -211,6 +216,11 @@
     },
     settings: {
       micThreshold: 35
+    },
+    auth: {
+      user: null,
+      accessToken: "",
+      refreshToken: ""
     }
   };
 
@@ -316,6 +326,87 @@
     }
   }
 
+  function saveAuthSession() {
+    try {
+      if (!state.auth || !state.auth.accessToken || !state.auth.refreshToken) {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        return;
+      }
+      window.localStorage.setItem(
+        AUTH_STORAGE_KEY,
+        JSON.stringify({
+          user: state.auth.user,
+          accessToken: state.auth.accessToken,
+          refreshToken: state.auth.refreshToken
+        })
+      );
+    } catch (error) {
+      // Ignore storage errors.
+    }
+  }
+
+  function restoreAuthSession() {
+    try {
+      const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      state.auth.user = saved && saved.user && typeof saved.user === "object" ? saved.user : null;
+      state.auth.accessToken = saved && typeof saved.accessToken === "string" ? saved.accessToken : "";
+      state.auth.refreshToken = saved && typeof saved.refreshToken === "string" ? saved.refreshToken : "";
+    } catch (error) {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }
+
+  function clearAuthSession() {
+    state.auth.user = null;
+    state.auth.accessToken = "";
+    state.auth.refreshToken = "";
+    saveAuthSession();
+  }
+
+  function isAuthenticated() {
+    return !!(state.auth && state.auth.accessToken && state.auth.refreshToken);
+  }
+
+  function getProfileStorageKey() {
+    if (!state.auth || !state.auth.user) {
+      return null;
+    }
+    var userId = state.auth.user.id || state.auth.user.email;
+    return userId ? ("vitalcare_profile:" + String(userId).toLowerCase()) : null;
+  }
+
+  function applyProfileToUi(profile) {
+    var safeProfile = profile || {};
+    var name = safeProfile.name || "";
+    var role = safeProfile.role || "";
+    var institution = safeProfile.institution || "";
+    var license = safeProfile.license || "";
+
+    document.getElementById("profile-name-input").value = name;
+    document.getElementById("profile-role-input").value = role;
+    document.getElementById("profile-institution-input").value = institution;
+    document.getElementById("profile-license-input").value = license;
+
+    document.getElementById("profile-name-display").textContent = name || "Dr. User";
+    document.getElementById("profile-role-display").textContent = role || "Emergency Medicine";
+  }
+
+  function loadProfileForCurrentUser() {
+    var storageKey = getProfileStorageKey();
+    if (!storageKey) {
+      applyProfileToUi(null);
+      return;
+    }
+    try {
+      var saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      applyProfileToUi(saved);
+    } catch (e) {
+      applyProfileToUi(null);
+    }
+  }
+
   const transcriptPreview = document.getElementById("transcript-preview");
   const additionalInfo = document.getElementById("additional-info");
   const stepsList = document.getElementById("steps-list");
@@ -360,6 +451,20 @@
   const voiceDebugBody = document.getElementById("voice-debug-body");
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
+  const bottomNav = document.getElementById("bottom-nav");
+  const authTabLogin = document.getElementById("auth-tab-login");
+  const authTabRegister = document.getElementById("auth-tab-register");
+  const authSubtitle = document.getElementById("auth-subtitle");
+  const authStatus = document.getElementById("auth-status");
+  const authLoginForm = document.getElementById("auth-login-form");
+  const authRegisterForm = document.getElementById("auth-register-form");
+  const authLoginEmail = document.getElementById("auth-login-email");
+  const authLoginPassword = document.getElementById("auth-login-password");
+  const authRegisterName = document.getElementById("auth-register-name");
+  const authRegisterEmail = document.getElementById("auth-register-email");
+  const authRegisterPassword = document.getElementById("auth-register-password");
+  const authRegisterConfirm = document.getElementById("auth-register-confirm");
+  const profileLogoutButton = document.getElementById("profile-logout-btn");
   const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
     return !element.matches("i, .fa-solid, .fa-regular, .fa-brands");
   });
@@ -489,6 +594,9 @@
   }
 
   function showScreen(name) {
+    if (!isAuthenticated() && name !== "auth") {
+      name = "auth";
+    }
     if (name !== "settings") {
       stopMicThresholdTester();
     }
@@ -498,6 +606,9 @@
     state.currentScreen = name;
     if (screens[name]) {
       screens[name].scrollTop = 0;
+    }
+    if (bottomNav) {
+      bottomNav.style.display = name === "auth" ? "none" : "flex";
     }
     saveState();
   }
@@ -666,7 +777,7 @@
 
   async function syncLatestVoiceResponse() {
     try {
-      const latestResponse = await fetchJson(API.latestResponse);
+      const latestResponse = await fetchJson(API.latestResponse, undefined, true);
       if (!latestResponse.created_at || latestResponse.created_at !== state.lastHandledAt) {
         return;
       }
@@ -1306,8 +1417,13 @@
     try { liveRecognition.start(); } catch (e) { stopLiveTranscript(); }
   }
 
-  async function fetchJson(url, options) {
-    const response = await fetch(url, options);
+  async function fetchJson(url, options, requireAuth) {
+    const baseOptions = options || {};
+    const headers = Object.assign({}, baseOptions.headers || {});
+    if (requireAuth && state.auth.accessToken) {
+      headers.Authorization = "Bearer " + state.auth.accessToken;
+    }
+    const response = await fetch(url, Object.assign({}, baseOptions, { headers: headers }));
     if (!response.ok) {
       const payload = await response.json().catch(function () {
         return {};
@@ -1317,10 +1433,116 @@
     return response.json();
   }
 
+  function setAuthStatus(message, isError) {
+    if (!authStatus) return;
+    authStatus.textContent = message || "";
+    authStatus.style.color = isError ? "#c53030" : "var(--text-muted)";
+  }
+
+  function setAuthMode(mode) {
+    const loginMode = mode !== "register";
+    authTabLogin.classList.toggle("auth-tab--active", loginMode);
+    authTabRegister.classList.toggle("auth-tab--active", !loginMode);
+    authLoginForm.classList.toggle("is-hidden", !loginMode);
+    authRegisterForm.classList.toggle("is-hidden", loginMode);
+    if (authSubtitle) {
+      authSubtitle.textContent = loginMode
+        ? "Sign in to access patient protocols and tools."
+        : "Create your clinician account to continue.";
+    }
+    setAuthStatus("", false);
+  }
+
+  function resetAuthForms() {
+    if (authLoginForm) authLoginForm.reset();
+    if (authRegisterForm) authRegisterForm.reset();
+  }
+
+  async function handleLoginSubmit(event) {
+    event.preventDefault();
+    setAuthStatus("Signing in...", false);
+    try {
+      const payload = await fetchJson(
+        API.authLogin,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: authLoginEmail.value.trim(),
+            password: authLoginPassword.value
+          })
+        },
+        false
+      );
+      state.auth.user = payload.user || null;
+      state.auth.accessToken = payload.access_token || "";
+      state.auth.refreshToken = payload.refresh_token || "";
+      saveAuthSession();
+      loadProfileForCurrentUser();
+      ensureSyncLoops();
+      setAuthStatus("", false);
+      showScreen("home");
+      refreshHomeDashboard();
+    } catch (error) {
+      setAuthStatus(error.message || "Login failed.", true);
+    }
+  }
+
+  async function handleRegisterSubmit(event) {
+    event.preventDefault();
+    const password = authRegisterPassword.value;
+    const confirm = authRegisterConfirm.value;
+    if (password !== confirm) {
+      setAuthStatus("Passwords do not match.", true);
+      return;
+    }
+    setAuthStatus("Creating account...", false);
+    try {
+      const payload = await fetchJson(
+        API.authRegister,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: authRegisterEmail.value.trim(),
+            password: password,
+            full_name: authRegisterName.value.trim() || null
+          })
+        },
+        false
+      );
+      state.auth.user = payload.user || null;
+      state.auth.accessToken = payload.access_token || "";
+      state.auth.refreshToken = payload.refresh_token || "";
+      saveAuthSession();
+      loadProfileForCurrentUser();
+      ensureSyncLoops();
+      setAuthStatus("", false);
+      showScreen("home");
+      refreshHomeDashboard();
+    } catch (error) {
+      setAuthStatus(error.message || "Registration failed.", true);
+    }
+  }
+
+  async function performLogout() {
+    try {
+      if (state.auth.accessToken) {
+        await fetchJson(API.authLogout, { method: "POST" }, true);
+      }
+    } catch (error) {
+      // Ignore backend logout errors and continue with local logout.
+    }
+    clearAuthSession();
+    resetAuthForms();
+    setAuthMode("login");
+    showScreen("auth");
+  }
+
   async function toggleRecording(target) {
     try {
       state.pendingRecordingTarget = target;
-      const result = await fetchJson(API.toggle, { method: "POST" });
+      const result = await fetchJson(API.toggle, { method: "POST" }, true);
       if (result.state === "recording_started") {
         startLiveTranscript(target);
         renderMicButtons("recording");
@@ -1381,7 +1603,7 @@
 
   async function syncRecordingStatus() {
     try {
-      const status = await fetchJson(API.status);
+      const status = await fetchJson(API.status, undefined, true);
       const uiState = status.recording ? "recording" : (status.transcribing ? "transcribing" : "idle");
       renderMicButtons(uiState);
 
@@ -1422,7 +1644,7 @@
 
   async function syncLatestResult() {
     try {
-      const latest = await fetchJson(API.latestTranscription);
+      const latest = await fetchJson(API.latestTranscription, undefined, true);
       if (!latest.created_at || latest.created_at === state.lastHandledAt) {
         return;
       }
@@ -1486,6 +1708,16 @@
     }
   }
 
+  var syncLoopsStarted = false;
+  function ensureSyncLoops() {
+    if (syncLoopsStarted) return;
+    syncLoopsStarted = true;
+    syncRecordingStatus();
+    syncLatestResult();
+    window.setInterval(syncRecordingStatus, 1500);
+    window.setInterval(syncLatestResult, 1500);
+  }
+
   async function submitVoiceText() {
     const message = voiceTextInput.value.trim();
     if (!message) {
@@ -1505,7 +1737,7 @@
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ text: message })
-      });
+      }, true);
 
       state.lastHandledAt = result.created_at || state.lastHandledAt;
       state.chatData.summary = result.text || message;
@@ -1529,6 +1761,17 @@
       renderVoiceChat();
     }
   }
+
+  authTabLogin.addEventListener("click", function () {
+    setAuthMode("login");
+  });
+
+  authTabRegister.addEventListener("click", function () {
+    setAuthMode("register");
+  });
+
+  authLoginForm.addEventListener("submit", handleLoginSubmit);
+  authRegisterForm.addEventListener("submit", handleRegisterSubmit);
 
   document.querySelectorAll("[data-protocol]").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -1700,7 +1943,7 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: prompt })
-      });
+      }, true);
 
       console.log("[Steps] Pipeline response:", result.llm_response);
       var llmSteps = result.llm_response ? parseLLMSteps(result.llm_response) : null;
@@ -2011,25 +2254,25 @@
     var roleDisplay = document.getElementById("profile-role-display");
     if (nameDisplay && name) nameDisplay.textContent = name;
     if (roleDisplay && role) roleDisplay.textContent = role;
-    try { localStorage.setItem("vitalcare_profile", JSON.stringify({ name: name, role: role,
-      institution: document.getElementById("profile-institution-input").value.trim(),
-      license: document.getElementById("profile-license-input").value.trim() })); } catch(e) {}
+    var storageKey = getProfileStorageKey();
+    try {
+      if (storageKey) {
+        localStorage.setItem(storageKey, JSON.stringify({
+          name: name,
+          role: role,
+          institution: document.getElementById("profile-institution-input").value.trim(),
+          license: document.getElementById("profile-license-input").value.trim()
+        }));
+      }
+    } catch(e) {}
     navigateTo("home");
   });
 
-  // Restore saved profile
-  (function () {
-    try {
-      var saved = JSON.parse(localStorage.getItem("vitalcare_profile") || "null");
-      if (!saved) return;
-      if (saved.name) { document.getElementById("profile-name-input").value = saved.name;
-        document.getElementById("profile-name-display").textContent = saved.name; }
-      if (saved.role) { document.getElementById("profile-role-input").value = saved.role;
-        document.getElementById("profile-role-display").textContent = saved.role; }
-      if (saved.institution) document.getElementById("profile-institution-input").value = saved.institution;
-      if (saved.license) document.getElementById("profile-license-input").value = saved.license;
-    } catch(e) {}
-  }());
+  profileLogoutButton.addEventListener("click", function () {
+    performLogout();
+  });
+
+  loadProfileForCurrentUser();
 
   textSizeSlider.addEventListener("input", function (event) {
     applyTextScale(Number(event.target.value));
@@ -2056,7 +2299,9 @@
     }
   });
 
+  restoreAuthSession();
   restoreState();
+  setAuthMode("login");
   renderPatientInfo();
   renderVitalsView();
   renderVoiceChat();
@@ -2065,9 +2310,13 @@
   updateCalculatorLabels();
   applyTextScale(Number(textSizeSlider.value));
   renderMicButtons("idle");
-  showScreen(state.currentScreen);
-  syncRecordingStatus();
-  syncLatestResult();
-  window.setInterval(syncRecordingStatus, 1500);
-  window.setInterval(syncLatestResult, 1500);
+  if (!isAuthenticated()) {
+    showScreen("auth");
+  } else {
+    if (state.currentScreen === "auth") {
+      state.currentScreen = "home";
+    }
+    showScreen(state.currentScreen);
+    ensureSyncLoops();
+  }
 })();

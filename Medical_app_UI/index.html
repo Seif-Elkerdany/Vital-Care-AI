@@ -15,6 +15,48 @@
       <section class="phone-frame">
         <div class="phone-notch"></div>
 
+        <section class="screen" id="screen-auth">
+          <header class="home-header">
+            <div class="home-header__brand">
+              <div class="home-logo-icon"><img src="./images/vc_logo.png" alt="VC Logo" class="home-logo-img" /></div>
+              <div>
+                <h1 class="home-title">Vital Care AI</h1>
+              </div>
+            </div>
+          </header>
+
+          <div class="auth-card">
+            <div class="auth-tabs">
+              <button class="auth-tab auth-tab--active" id="auth-tab-login" type="button">Sign In</button>
+              <button class="auth-tab" id="auth-tab-register" type="button">Create Account</button>
+            </div>
+
+            <p class="auth-subtitle" id="auth-subtitle">Sign in to access patient protocols and tools.</p>
+
+            <form id="auth-login-form" class="auth-form">
+              <label class="field-label" for="auth-login-email">Email</label>
+              <input id="auth-login-email" class="text-input" type="email" required autocomplete="email" />
+              <label class="field-label" for="auth-login-password">Password</label>
+              <input id="auth-login-password" class="text-input" type="password" minlength="8" required autocomplete="current-password" />
+              <button class="action-button" type="submit">Sign In</button>
+            </form>
+
+            <form id="auth-register-form" class="auth-form is-hidden">
+              <label class="field-label" for="auth-register-name">Full Name</label>
+              <input id="auth-register-name" class="text-input" type="text" autocomplete="name" />
+              <label class="field-label" for="auth-register-email">Email</label>
+              <input id="auth-register-email" class="text-input" type="email" required autocomplete="email" />
+              <label class="field-label" for="auth-register-password">Password</label>
+              <input id="auth-register-password" class="text-input" type="password" minlength="8" required autocomplete="new-password" />
+              <label class="field-label" for="auth-register-confirm">Confirm Password</label>
+              <input id="auth-register-confirm" class="text-input" type="password" minlength="8" required autocomplete="new-password" />
+              <button class="action-button" type="submit">Create Account</button>
+            </form>
+
+            <p class="status-text auth-status" id="auth-status"></p>
+          </div>
+        </section>
+
         <section class="screen screen--active" id="screen-home">
           <!-- Header -->
           <header class="home-header">
@@ -314,7 +356,8 @@ Cultures drawn</textarea>
           </div>
 
           <div class="footer-action">
-            <button class="action-button" type="button" id="profile-save-btn">Save Profile</button>
+            <button class="action-button" type="button" id="profile-save-btn">Save</button>
+            <button class="menu-card" type="button" id="profile-logout-btn">Log Out</button>
           </div>
         </section>
 
