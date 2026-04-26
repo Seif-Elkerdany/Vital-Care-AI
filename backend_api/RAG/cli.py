@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 
+from backend_api.db import build_document_catalog
+
 from .config import RAGConfig
 from .service import RAGService
 
@@ -65,7 +67,12 @@ def main() -> None:
         collection_name=args.collection,
         embedding_model=args.embedding_model,
     )
-    service = RAGService(config)
+    document_catalog = build_document_catalog()
+    service = (
+        RAGService(config, document_catalog=document_catalog)
+        if document_catalog is not None
+        else RAGService(config)
+    )
 
     if args.command == "add":
         result = service.add_pdfs(args.pdfs)
