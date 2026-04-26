@@ -747,6 +747,5 @@ class OpenAICompatClient:
         temperature: float = 0.0,
         max_output_tokens: int = 4096,
     ) -> str:
-        _ = temperature, max_output_tokens  # LLMEngine handles its own sampling limits
         combined = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-        return self.llm_engine.generate(combined)
+        return self.llm_engine.generate(combined, max_tokens=max_output_tokens, temperature=temperature)

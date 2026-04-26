@@ -27,6 +27,16 @@ class PDFDocument:
     pages: list[PDFPage]
 
 
+def build_document_id(document_name: str, file_hash: str) -> str:
+    normalized_name = str(document_name or "").strip()
+    if not normalized_name:
+        raise ValueError("Document name must be non-empty.")
+    normalized_hash = str(file_hash or "").strip()
+    if not normalized_hash:
+        raise ValueError("File hash must be non-empty.")
+    return str(uuid5(NAMESPACE_URL, f"{normalized_name}:{normalized_hash}"))
+
+
 def _read_metadata_value(raw_metadata: Any, key: str) -> str:
     value = ""
     if raw_metadata:
@@ -124,7 +134,13 @@ def _normalize_page_text(raw_text: str) -> tuple[str, str]:
     return normalized, section_label
 
 
-def load_pdf(pdf_path: str | Path) -> PDFDocument:
+def load_pdf(
+    pdf_path: str | Path,
+    *,
+    document_name: str | None = None,
+    document_id: str | None = None,
+    source_path: str | None = None,
+) -> PDFDocument:
     try:
         from pypdf import PdfReader
     except Exception as exc:
@@ -140,7 +156,11 @@ def load_pdf(pdf_path: str | Path) -> PDFDocument:
 
     file_bytes = path.read_bytes()
     file_hash = sha256(file_bytes).hexdigest()
-    document_id = str(uuid5(NAMESPACE_URL, f"{path.name}:{file_hash}"))
+    resolved_document_name = str(document_name or path.name).strip() or path.name
+    resolved_document_id = str(document_id or "").strip() or build_document_id(
+        resolved_document_name,
+        file_hash,
+    )
 
     reader = PdfReader(str(path))
     raw_metadata = reader.metadata or {}
@@ -158,9 +178,9 @@ def load_pdf(pdf_path: str | Path) -> PDFDocument:
             )
 
     return PDFDocument(
-        document_id=document_id,
-        document_name=path.name,
-        source_path=str(path),
+        document_id=resolved_document_id,
+        document_name=resolved_document_name,
+        source_path=str(source_path or path),
         file_hash=file_hash,
         file_size=path.stat().st_size,
         total_pages=len(reader.pages),

@@ -1,12 +1,22 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from pathlib import Path
+
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.responses import Response
 
+from backend_api.api.admin import build_admin_router
+from backend_api.api.auth import build_auth_router
+from backend_api.api.chat import build_chat_router
+
 from .schemas import (
+    GuidelineListResponse,
+    GuidelineUploadResponse,
     HealthResponse,
     LLMResponseResult,
     RecordingStatusResponse,
+    StepsResponse,
     TextInputRequest,
     ToggleRecordingResponse,
     TranscriptionListResponse,
@@ -14,7 +24,14 @@ from .schemas import (
 )
 
 
-def create_app(stt_service):
+def create_app(
+    stt_service,
+    rag_service=None,
+    *,
+    auth_service=None,
+    chat_service=None,
+    invitation_service=None,
+):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
@@ -25,6 +42,11 @@ def create_app(stt_service):
             stt_service.stop_hotkey_listener()
 
     app = FastAPI(title="MedAPP STT API", version="1.0.0", lifespan=lifespan)
+    resolved_rag_service = (
+        rag_service
+        or getattr(stt_service, "rag_service", None)
+        or getattr(getattr(stt_service, "pipeline_engine", None), "rag_service", None)
+    )
 
     def require_latest_transcription() -> TranscriptionResult:
         latest = stt_service.latest()
@@ -41,6 +63,14 @@ def create_app(stt_service):
             )
         return latest
 
+    def require_rag_service():
+        if resolved_rag_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="RAG service is not available.",
+            )
+        return resolved_rag_service
+
     @app.get("/health", response_model=HealthResponse)
     async def health():
         return HealthResponse(status="ok")
@@ -50,8 +80,8 @@ def create_app(stt_service):
         return stt_service.status()
 
     @app.post("/recording/toggle", response_model=ToggleRecordingResponse)
-    async def toggle_recording():
-        return ToggleRecordingResponse(state=stt_service.toggle_recording())
+    async def toggle_recording(stt_only: bool = Query(default=False)):
+        return ToggleRecordingResponse(state=stt_service.toggle_recording(stt_only=stt_only))
 
     @app.get("/transcriptions/latest", response_model=TranscriptionResult)
     async def latest_transcription():
@@ -64,6 +94,13 @@ def create_app(stt_service):
     @app.post("/pipeline/text", response_model=TranscriptionResult)
     async def process_text(body: TextInputRequest):
         return stt_service.process_text_input(body.text)
+
+    @app.post("/pipeline/steps", response_model=StepsResponse)
+    async def generate_steps(body: TextInputRequest):
+        try:
+            return stt_service.generate_steps(body.text)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
 
     @app.get("/responses/latest", response_model=LLMResponseResult)
     async def latest_response():
@@ -93,5 +130,65 @@ def create_app(stt_service):
                 raise HTTPException(status_code=503, detail=latest.tts_error)
             raise HTTPException(status_code=404, detail="MP3 audio is not available for latest LLM response.")
         return Response(content=audio_mp3, media_type="audio/mpeg")
+
+    if auth_service is not None and invitation_service is not None:
+        app.include_router(build_auth_router(auth_service, invitation_service))
+
+    if auth_service is not None and chat_service is not None:
+        app.include_router(build_chat_router(auth_service, chat_service))
+
+    if auth_service is not None and invitation_service is not None:
+        app.include_router(build_admin_router(auth_service, invitation_service, resolved_rag_service))
+    else:
+        @app.post("/admin/guidelines/upload", response_model=GuidelineUploadResponse)
+        async def upload_guideline(file: UploadFile = File(...)):
+            rag = require_rag_service()
+            try:
+                payload = await file.read()
+                return rag.publish_guideline(
+                    payload,
+                    original_filename=file.filename or "guideline.pdf",
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            finally:
+                await file.close()
+
+        @app.get("/admin/guidelines", response_model=GuidelineListResponse)
+        async def list_guidelines(include_deleted: bool = Query(default=False)):
+            rag = require_rag_service()
+            return GuidelineListResponse(
+                items=rag.list_documents(include_deleted=include_deleted)
+            )
+
+        @app.get("/admin/guidelines/{document_id}/download")
+        async def download_guideline(document_id: str):
+            rag = require_rag_service()
+            document = next(
+                (
+                    item
+                    for item in rag.list_documents(include_deleted=True)
+                    if str(item.get("document_id")) == document_id
+                ),
+                None,
+            )
+            if document is None:
+                raise HTTPException(status_code=404, detail="Guideline document was not found.")
+
+            file_location = document.get("file_url") or document.get("source_path")
+            if not file_location:
+                raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+            path = Path(str(file_location)).expanduser().resolve()
+            if not path.is_file():
+                raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+            return FileResponse(
+                path,
+                media_type="application/pdf",
+                filename=document.get("document_name") or f"{document_id}.pdf",
+            )
 
     return app

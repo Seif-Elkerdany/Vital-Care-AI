@@ -15,6 +15,7 @@ from .whisper_engine import WhisperEngine
 if TYPE_CHECKING:
     from backend_api.LLM.llm_engine import LLMEngine
     from backend_api.LLM.pipeline import LLMRAGPipeline
+    from backend_api.RAG.service import RAGService
     from backend_api.TTS.tts_engine import TTSEngine
 
 
@@ -25,6 +26,7 @@ class SpeechToTextService:
         language,
         llm_engine: Optional["LLMEngine"] = None,
         pipeline_engine: Optional["LLMRAGPipeline"] = None,
+        rag_service: Optional["RAGService"] = None,
         tts_engine: Optional["TTSEngine"] = None,
         tts_output_dir: Optional[str] = None,
         max_items: int = 100,
@@ -35,6 +37,7 @@ class SpeechToTextService:
         self.engine = engine or WhisperEngine(model_id=model_id, language=language)
         self.llm_engine = llm_engine
         self.pipeline_engine = pipeline_engine
+        self.rag_service = rag_service
         self.tts_engine = tts_engine
         self.tts_output_dir = Path(tts_output_dir).expanduser() if tts_output_dir else None
         self.recorder = recorder or AudioRecorder()
@@ -106,7 +109,7 @@ class SpeechToTextService:
 
         return None
 
-    def toggle_recording(self):
+    def toggle_recording(self, *, stt_only: bool = False):
         try:
             if not self.recorder.recording:
                 if self._busy.is_set():
@@ -126,7 +129,7 @@ class SpeechToTextService:
             self._last_error = None
             self._last_event = "transcribing"
             try:
-                self._start_transcription(audio)
+                self._start_transcription(audio, stt_only=stt_only)
             except Exception:
                 self._busy.clear()
                 raise
@@ -136,13 +139,18 @@ class SpeechToTextService:
             self._last_event = "error"
             return "error"
 
-    def _start_transcription(self, audio):
-        worker = threading.Thread(target=self._transcribe_worker, args=(audio,), daemon=True)
+    def _start_transcription(self, audio, *, stt_only: bool = False):
+        worker = threading.Thread(
+            target=self._transcribe_worker,
+            args=(audio,),
+            kwargs={"stt_only": stt_only},
+            daemon=True,
+        )
         worker.start()
 
-    def _transcribe_worker(self, audio):
+    def _transcribe_worker(self, audio, *, stt_only: bool = False):
         try:
-            result = self.process_audio(audio)
+            result = self.process_audio(audio, stt_only=stt_only)
             self._last_error = None
             self._last_event = "published"
             print(f"[{result.elapsed_seconds:.2f}s] {result.text}")
@@ -159,13 +167,17 @@ class SpeechToTextService:
         finally:
             self._busy.clear()
 
-    def process_audio(self, audio) -> TranscriptionResult:
+    def process_audio(self, audio, *, stt_only: bool = False) -> TranscriptionResult:
         started = time.perf_counter()
         text = self.engine.transcribe(audio)
         elapsed = time.perf_counter() - started
         final_text = (text or "").strip() or "(no speech recognized)"
 
-        return self._process_text(final_text, transcription_elapsed=elapsed)
+        return self._process_text(
+            final_text,
+            transcription_elapsed=elapsed,
+            run_pipeline=not stt_only,
+        )
 
     def process_text_input(self, text: str) -> TranscriptionResult:
         cleaned = (text or "").strip()
@@ -189,13 +201,19 @@ class SpeechToTextService:
         finally:
             self._busy.clear()
 
-    def _process_text(self, input_text: str, *, transcription_elapsed: float) -> TranscriptionResult:
+    def _process_text(
+        self,
+        input_text: str,
+        *,
+        transcription_elapsed: float,
+        run_pipeline: bool = True,
+    ) -> TranscriptionResult:
         pipeline_elapsed = None
         structured_query = None
         retrievals = None
         rag_error = None
 
-        if self.pipeline_engine is not None:
+        if run_pipeline and self.pipeline_engine is not None:
             pipeline_started = time.perf_counter()
             try:
                 pipeline_result = self.pipeline_engine.run(input_text)
@@ -208,15 +226,21 @@ class SpeechToTextService:
                 llm_response = f"Pipeline failed: {exc}"
             pipeline_elapsed = time.perf_counter() - pipeline_started
             llm_elapsed = pipeline_elapsed
-        else:
+        elif run_pipeline:
             llm_response, llm_elapsed = self._generate_llm_response(input_text)
+        else:
+            llm_response = None
+            llm_elapsed = None
 
-        tts_input = llm_response or input_text
-        tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
+        if run_pipeline:
+            tts_input = llm_response or input_text
+            tts_audio_wav, tts_elapsed, tts_error = self._generate_tts_audio(tts_input)
+        else:
+            tts_audio_wav, tts_elapsed, tts_error = (None, None, None)
         tts_wav_path = None
         tts_mp3_path = None
 
-        if llm_response is None and self.tts_engine is not None:
+        if run_pipeline and llm_response is None and self.tts_engine is not None:
             llm_response = "[LLM disabled] Using transcript text for TTS."
 
         if tts_audio_wav is not None:
@@ -429,6 +453,49 @@ class SpeechToTextService:
             raise RuntimeError(
                 f"MP3 conversion failed (soundfile: {conversion_error}, ffmpeg: {stderr or process.returncode})"
             )
+
+    def generate_steps(self, patient_text: str) -> dict:
+        """Retrieve RAG context then generate numbered clinical steps for the assessment screen."""
+        if self.pipeline_engine is None:
+            raise RuntimeError("Pipeline engine is not configured.")
+
+        from backend_api.LLM.prompts import CLINICAL_DECISION_SUPPORT_PROMPT
+
+        retrievals = []
+        rag_error = None
+        if self.pipeline_engine.rag_service is not None:
+            try:
+                hits = self.pipeline_engine.rag_service.search(
+                    "sepsis management immediate steps antibiotics fluid resuscitation lactate",
+                    top_k=5,
+                )
+                for hit in hits:
+                    retrievals.append(hit)
+            except Exception as exc:
+                rag_error = str(exc)
+
+        context_block = ""
+        if retrievals:
+            lines = []
+            for i, hit in enumerate(retrievals, 1):
+                text = (hit.get("text") or "").replace("\n", " ").strip()[:400]
+                meta = hit.get("metadata") or {}
+                source = meta.get("document_name") or "guideline"
+                page = meta.get("page_number")
+                label = f"{source} p.{page}" if page else source
+                lines.append(f"[{i}] {label}: {text}")
+            context_block = "\n\nRelevant guideline context:\n" + "\n".join(lines)
+
+        full_prompt = patient_text + context_block
+
+        llm_response = self.pipeline_engine.llm_client.generate(
+            full_prompt,
+            system_instruction=CLINICAL_DECISION_SUPPORT_PROMPT,
+            temperature=0.1,
+            max_output_tokens=1024,
+        )
+
+        return {"llm_response": llm_response, "retrievals": retrievals, "rag_error": rag_error}
 
     def status(self):
         latest = self.latest()

@@ -34,7 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", help="Search query.")
     search_parser.add_argument("--top-k", type=int, default=5, help="Number of hits to return.")
 
-    subparsers.add_parser("list", help="List indexed documents.")
+    list_parser = subparsers.add_parser("list", help="List indexed documents.")
+    list_parser.add_argument(
+        "--include-deleted",
+        action="store_true",
+        help="Include soft-deleted managed guideline records.",
+    )
 
     delete_id_parser = subparsers.add_parser(
         "delete-id",
@@ -73,7 +78,7 @@ def main() -> None:
         return
 
     if args.command == "list":
-        result = service.list_documents()
+        result = service.list_documents(include_deleted=args.include_deleted)
         print(json.dumps(result, indent=2))
         return
 

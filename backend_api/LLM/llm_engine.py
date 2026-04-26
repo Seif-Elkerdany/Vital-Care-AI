@@ -36,7 +36,7 @@ class LLMEngine:
             )
         return self._client
 
-    def generate(self, transcript: str) -> str:
+    def generate(self, transcript: str, *, max_tokens: int = 1024, temperature: float = 0.1) -> str:
         cleaned = transcript.strip()
         if not cleaned:
             return "No speech was recognized."
@@ -44,8 +44,8 @@ class LLMEngine:
         client = self._get_client()
         response = client.chat.completions.create(
             model=self.model,
-            max_tokens=400,
-            temperature=0.1,
+            max_tokens=max_tokens,
+            temperature=temperature,
             messages=[
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": cleaned},

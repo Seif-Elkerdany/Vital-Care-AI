@@ -45,6 +45,8 @@ class BackendDefaultsTests(unittest.TestCase):
         self.assertEqual(config.chunk_size, 600)
         self.assertEqual(config.chunk_overlap, 120)
         self.assertEqual(config.top_k, 5)
+        self.assertEqual(config.guideline_upload_dir, "data/guidelines")
+        self.assertEqual(config.guideline_stale_months, 24)
 
 
 if __name__ == "__main__":

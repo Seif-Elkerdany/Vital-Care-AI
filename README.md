@@ -1,240 +1,482 @@
 # MedAPP
 
-`backend_api/` is the canonical Python backend package for this project.
+MedAPP is a medical instructions and reminder app for doctors.
 
-It is split into four backend modules:
-- `backend_api/LLM`
-- `backend_api/RAG`
-- `backend_api/STT`
-- `backend_api/TTS`
+This repository contains:
+- a Python/FastAPI backend in `backend_api/`
+- a React/Vite frontend in `Medical_app_UI/`
+- Qdrant for vector search
+- PostgreSQL for application data
 
-The old top-level `llm/`, `rag/`, `stt/`, and `tts/` locations are now compatibility wrappers only.
+## Repository Layout
 
-`Medical_app_UI/` was intentionally left unchanged.
+Backend:
+- `main.py`: backend entrypoint
+- `backend_api/bootstrap.py`: app assembly
+- `backend_api/STT`: speech-to-text routes and service orchestration
+- `backend_api/LLM`: LLM clients and RAG answering pipeline
+- `backend_api/RAG`: PDF ingestion, chunking, embeddings, and Qdrant integration
+- `backend_api/TTS`: text-to-speech
+- `backend_api/db`: PostgreSQL config, migrations, repositories, services, seed, and verification
 
-## Quick Start
+Frontend:
+- `Medical_app_UI/src/main.tsx`: frontend entrypoint
+- `Medical_app_UI/src/app`: React UI
 
-1. Install backend dependencies:
+Compatibility wrappers:
+- the old top-level `llm/`, `rag/`, `stt/`, `tts/`, and `pipeline.py` are compatibility wrappers only
+- new backend work should go under `backend_api/`
 
-```bash
-pip install -r requirements.txt
-```
+## Source Of Truth
 
-2. Start Qdrant:
+Database schema:
+- source of truth: `backend_api/db/migrations/`
+- reference only: `schema.sql`
 
-```bash
-docker compose up -d
-```
+Environment files:
+- runtime config: `.env`
+- template: `.env.example`
 
-3. Set your LLM provider credentials.
+## Current Architecture
 
-Gemini example:
+Qdrant:
+- embeddings
+- vector search
 
-```bash
-export LLM_BACKEND=gemini
-export GEMINI_API_KEY="your_key_here"
-export GEMINI_MODEL=gemini-2.5-flash
-```
+PostgreSQL:
+- users
+- chat threads
+- chat messages
+- documents metadata
+- document chunks metadata
+- message sources
+- admin invitations
 
-OpenAI-compatible example:
+Important current limitation:
+- the current frontend was intentionally not rewritten
+- it still talks to the older STT/RAG endpoints
+- frontend activity does not yet populate the new PostgreSQL chat tables
+- PostgreSQL-backed chat flows can still be tested manually through the backend API
 
-```bash
-export LLM_BACKEND=openai
-export LLM_API_KEY="your_key_here"
-export LLM_BASE_URL="https://llm-api.arc.vt.edu/api/v1"
-export LLM_MODEL="gpt-oss-120b"
-```
+## Backend Quick Start
 
-4. Run the backend:
-
-```bash
-python main.py
-```
-
-5. Use one of these paths:
-- voice path: focus the terminal and press `M` to start/stop recording
-- text path: send a request to `/pipeline/text`
-
-Example text request:
-
-```bash
-curl -X POST http://localhost:8000/pipeline/text \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Patient is febrile and hypotensive"}'
-```
-
-## Install
+1. Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Start Qdrant:
+2. Start infrastructure:
 
 ```bash
 docker compose up -d
 ```
 
-## Environment Setup
+3. Create `.env` from the template.
 
-Common backend settings:
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Bash:
+
+```bash
+cp .env.example .env
+```
+
+4. Set the required values in `.env`.
+
+Minimum local example:
 
 ```env
-LLM_ENABLED=true
-RAG_ENABLED=true
-TTS_ENABLED=true
-
 LLM_BACKEND=gemini
-GEMINI_API_KEY=your_key_here
+GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.5-flash
 
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=medical_documents
 
-TTS_VOICE=af_heart
-TTS_LANG_CODE=a
-TTS_SAMPLE_RATE=24000
-TTS_OUTPUT_DIR=stt/output_audio
+DATABASE_URL=postgresql://medical_user:medical_password@localhost:5432/medical_rag_app
+
+APP_AUTH_SECRET=replace-this-with-a-long-random-secret
+AUTH_REFRESH_TOKEN_TTL_SECONDS=2592000
+AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS=3600
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM_EMAIL=your_email@gmail.com
+APP_RESET_PASSWORD_URL_BASE=http://localhost:5173/reset-password
+
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-me-admin-password
+ADMIN_FULL_NAME=MedAPP Admin
+
+PGADMIN_DEFAULT_EMAIL=admin@example.com
+PGADMIN_DEFAULT_PASSWORD=change-me-pgadmin
 ```
 
-If you want the OpenAI-compatible LLM path instead of Gemini:
+If the backend later runs inside Docker Compose instead of on your host machine, use:
 
 ```env
-LLM_BACKEND=openai
-LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://llm-api.arc.vt.edu/api/v1
-LLM_MODEL=gpt-oss-120b
+DATABASE_URL=postgresql://medical_user:medical_password@postgres:5432/medical_rag_app
 ```
 
-## Run The Backend
+Auth and reset-password notes:
+- `APP_AUTH_SECRET` should be a long random value and the same running backend must keep using it while tokens are active.
+- `AUTH_TOKEN_TTL_SECONDS` controls access token lifetime.
+- `AUTH_REFRESH_TOKEN_TTL_SECONDS` controls refresh/session lifetime.
+- `AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS` controls how long password reset links stay valid.
+- For Gmail SMTP, `SMTP_PASSWORD` must be a Gmail app password, not the normal Gmail login password.
+- `APP_RESET_PASSWORD_URL_BASE` is the frontend page used in reset emails. With `http://localhost:5173/reset-password`, the link only works on the same computer running the Vite frontend on port `5173`.
+- For another local device, use the frontend host machine IP, for example `http://192.168.1.25:5173/reset-password`.
+- For deployment, use the deployed frontend URL, for example `https://your-domain.com/reset-password`.
+- The reset email is only sent when all SMTP variables and `APP_RESET_PASSWORD_URL_BASE` are present.
+- The requested reset email must belong to an existing user in the current database. Unknown emails intentionally receive a generic success response and no email is sent.
 
-Gemini path:
+5. Apply migrations:
 
 ```bash
-python main.py --gemini-api-key "<your key>" --gemini-model gemini-2.5-flash
+python -m backend_api.db.migrate
 ```
 
-OpenAI-compatible path:
+6. Seed the first admin:
 
 ```bash
-python main.py \
-  --llm-backend openai \
-  --llm-base-url "https://llm-api.arc.vt.edu/api/v1" \
-  --llm-api-key "<your key>" \
-  --llm-model "gpt-oss-120b"
+python -m backend_api.db.seed_admin
 ```
 
-Disable LLM chaining:
+7. Start the backend:
 
 ```bash
-python main.py --disable-llm
+python main.py
 ```
 
-## STT Setup
-
-The backend STT layer uses Whisper and microphone capture.
-
-Current STT defaults:
-- model: `openai/whisper-medium`
-- language: `en`
-- sample rate: `16000`
-- channels: `1`
-
-Run with explicit STT settings:
+8. Optional smoke test:
 
 ```bash
-python main.py \
-  --model "openai/whisper-medium" \
-  --language "en"
+python -m backend_api.db.verify
 ```
 
-Voice capture flow:
-- focus the terminal running the backend
-- press `M` once to start recording
-- press `M` again to stop recording and process the audio
+Backend docs:
 
-Important notes:
-- the `M` hotkey works on the machine running the backend
-- the first Whisper run may take time because the model can be downloaded
-- if microphone capture fails, check OS microphone permissions
+```text
+http://localhost:8000/docs
+```
 
-Useful STT endpoints:
+## Frontend Quick Start
+
+The frontend lives in `Medical_app_UI/`.
+
+Install and run:
+
+```bash
+cd Medical_app_UI
+npm install
+npm run dev
+```
+
+The Vite dev server is usually:
+
+```text
+http://localhost:5173
+```
+
+The current UI expects the backend at:
+
+```text
+http://localhost:8000
+```
+
+Frontend modes:
+- mobile UI (primary): `Medical_app_UI/index.html` with `app.js` and `app.css`
+- react/web UI: `Medical_app_UI/react.html` with `src/` React code
+- both modes call the same backend auth routes
+
+Mobile UI auth notes:
+- mobile login/register is built into `index.html` and `app.js`
+- mobile profile values are saved per authenticated user in browser local storage
+- if not authenticated, mobile navigation is gated and the auth screen is shown first
+
+## pgAdmin
+
+pgAdmin is included in `docker-compose.yml`.
+
+Open:
+
+```text
+http://localhost:5050
+```
+
+Login with:
+
+```text
+Email: admin@example.com
+Password: change-me-pgadmin
+```
+
+Then register the PostgreSQL server with:
+
+```text
+Host: postgres
+Port: 5432
+Database: medical_rag_app
+Username: medical_user
+Password: medical_password
+```
+
+Notes:
+- inside pgAdmin, use `postgres` as the host because pgAdmin runs in Docker
+- from desktop tools like DBeaver, use `localhost`
+
+## Useful Backend Routes
+
+Older STT/RAG flow:
 - `GET /health`
 - `GET /recording/status`
 - `POST /recording/toggle`
 - `GET /transcriptions/latest`
 - `GET /transcriptions`
 - `POST /pipeline/text`
-
-Example:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/recording/status
-curl -X POST http://localhost:8000/recording/toggle
-```
-
-## TTS Setup
-
-The backend TTS layer uses Kokoro and can generate WAV and MP3 outputs for the latest response.
-
-Current TTS defaults:
-- voice: `af_heart`
-- language code: `a`
-- sample rate: `24000`
-- output directory: `stt/output_audio`
-
-Run with explicit TTS settings:
-
-```bash
-python main.py \
-  --tts-voice af_heart \
-  --tts-lang-code a \
-  --tts-sample-rate 24000 \
-  --tts-output-dir stt/output_audio
-```
-
-Disable TTS:
-
-```bash
-python main.py --disable-tts
-```
-
-Useful TTS-related endpoints:
 - `GET /responses/latest`
 - `GET /responses/latest/audio`
 - `GET /responses/latest/audio/mp3`
 
-Example:
+New PostgreSQL-backed routes:
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /auth/me`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `POST /auth/password-reset/request`
+- `POST /auth/password-reset/confirm`
+- `POST /auth/admin-invitations/accept`
+- `POST /chat/threads`
+- `GET /chat/threads`
+- `GET /chat/threads/{thread_id}/messages`
+- `POST /chat/threads/{thread_id}/turns`
+- `POST /admin/invitations`
+- `POST /admin/guidelines/upload`
+- `GET /admin/guidelines`
+- `POST /admin/guidelines/{document_id}/approve`
 
-```bash
-curl http://localhost:8000/responses/latest
-curl http://localhost:8000/responses/latest/audio --output latest.wav
-curl http://localhost:8000/responses/latest/audio/mp3 --output latest.mp3
+## Auth And Password Reset
+
+Registration and login:
+- user emails are normalized to lowercase and validated for normal email format
+- passwords must be at least 8 characters
+- passwords are stored as salted hashes, never as plain text
+- login returns an access token, refresh token, and user payload
+- logout revokes the current session
+- password reset revokes existing sessions after the password changes
+
+Password reset flow:
+
+1. A registered user requests a reset:
+
+```http
+POST /auth/password-reset/request
 ```
 
-Important notes:
-- on Linux, Kokoro may need the system package `espeak-ng`
-- MP3 conversion may also rely on `ffmpeg` in fallback mode
-- if TTS is disabled, the backend still returns text responses
+```json
+{
+  "email": "doctor@example.com"
+}
+```
 
-## Current Flow
+2. If SMTP is configured and the user exists, the backend emails a link like:
 
-The backend keeps the same runtime behavior:
+```text
+http://localhost:5173/reset-password?token=RESET_TOKEN
+```
 
-`STT -> LLM query -> RAG -> LLM answer -> TTS`
+3. The reset page must read the `token` query parameter and call:
 
-Voice path:
-- focus the terminal
-- press `M` to start recording
-- press `M` again to stop and process
+```http
+POST /auth/password-reset/confirm
+```
 
-Text path:
+```json
+{
+  "token": "RESET_TOKEN",
+  "new_password": "newsecretpass"
+}
+```
+
+4. The backend validates the one-time token, checks expiry, updates the password, marks the token used, and revokes old sessions.
+
+Important:
+- the backend does not verify that an inbox exists during registration
+- it validates email format only
+- inbox ownership can be added later with an email verification-link flow
+
+## Frontend Auth Integration Checklist
+
+Backend base URL:
+
+```text
+http://localhost:8000
+```
+
+Register:
+
+```http
+POST /auth/register
+```
+
+```json
+{
+  "email": "doctor@example.com",
+  "password": "secretpass",
+  "full_name": "Doctor One"
+}
+```
+
+Login:
+
+```http
+POST /auth/login
+```
+
+```json
+{
+  "email": "doctor@example.com",
+  "password": "secretpass"
+}
+```
+
+Register and login return:
+
+```json
+{
+  "access_token": "ACCESS_TOKEN",
+  "refresh_token": "REFRESH_TOKEN",
+  "token_type": "bearer",
+  "user": {
+    "id": "USER_ID",
+    "email": "doctor@example.com",
+    "full_name": "Doctor One",
+    "role": "doctor",
+    "created_at": "2026-04-23T12:00:00Z",
+    "updated_at": "2026-04-23T12:00:00Z"
+  }
+}
+```
+
+Authenticated requests:
+
+```http
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Current user:
+
+```http
+GET /auth/me
+```
+
+Refresh tokens:
+
+```http
+POST /auth/refresh
+```
+
+```json
+{
+  "refresh_token": "REFRESH_TOKEN"
+}
+```
+
+Logout:
+
+```http
+POST /auth/logout
+Authorization: Bearer ACCESS_TOKEN
+```
+
+Request password reset:
+
+```http
+POST /auth/password-reset/request
+```
+
+```json
+{
+  "email": "doctor@example.com"
+}
+```
+
+The backend sends an email link using:
+
+```text
+APP_RESET_PASSWORD_URL_BASE?token=RESET_TOKEN
+```
+
+The frontend reset page should read `token` from the URL and confirm the new password:
+
+```http
+POST /auth/password-reset/confirm
+```
+
+```json
+{
+  "token": "RESET_TOKEN",
+  "new_password": "newsecretpass"
+}
+```
+
+Chat routes use the same bearer token:
+- `POST /chat/threads`
+- `GET /chat/threads`
+- `GET /chat/threads/{thread_id}/messages`
+- `POST /chat/threads/{thread_id}/turns`
+
+## Manual Database Testing
+
+To test PostgreSQL-backed chat persistence without changing the frontend:
+
+1. Open `http://localhost:8000/docs`
+2. Call `POST /auth/register` or `POST /auth/login`
+3. Copy the returned `access_token`
+4. Click `Authorize` in Swagger and paste:
+
+```text
+Bearer YOUR_ACCESS_TOKEN
+```
+
+5. Call:
+- `POST /chat/threads`
+- `GET /chat/threads`
+- `POST /chat/threads/{thread_id}/turns`
+- `GET /chat/threads/{thread_id}/messages`
+
+If Gemini is unavailable and you only want to test the DB-backed routes, you can temporarily run:
 
 ```bash
-curl -X POST http://localhost:8000/pipeline/text \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Test question"}'
+python main.py --disable-llm
+```
+
+## Contributor Notes
+
+Backend contributors:
+- prefer adding new backend code under `backend_api/`
+- keep Qdrant responsible for vector search
+- keep PostgreSQL responsible for application data and metadata
+- use migrations in `backend_api/db/migrations/` for schema changes
+- use parameterized SQL only
+
+Frontend contributors:
+- work inside `Medical_app_UI/`
+- the current UI still targets the older STT/RAG flow
+- wiring the UI into `/auth` and `/chat` is a separate frontend task
+
+Testing:
+
+```bash
+pytest
 ```
 
 ## Module Guides

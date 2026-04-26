@@ -1,5 +1,9 @@
 import os
 
+from backend_api.env import load_environment
+
+load_environment()
+
 
 SAMPLE_RATE = 16000
 CHANNELS = 1

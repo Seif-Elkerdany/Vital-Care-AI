@@ -1,12 +1,24 @@
 (function () {
   const STORAGE_KEY = "medapp-ui-state";
+  const AUTH_STORAGE_KEY = "medapp-auth-session";
   const API = {
     status: "http://localhost:8000/recording/status",
     toggle: "http://localhost:8000/recording/toggle",
     latestTranscription: "http://localhost:8000/transcriptions/latest",
     latestResponse: "http://localhost:8000/responses/latest",
     pipelineText: "http://localhost:8000/pipeline/text",
-    latestAudio: "http://localhost:8000/responses/latest/audio/mp3"
+    pipelineSteps: "http://localhost:8000/pipeline/steps",
+    latestAudio: "http://localhost:8000/responses/latest/audio/mp3",
+    toggleSttOnly: "http://localhost:8000/recording/toggle?stt_only=true",
+    authLogin: "http://localhost:8000/auth/login",
+    authRegister: "http://localhost:8000/auth/register",
+    authLogout: "http://localhost:8000/auth/logout",
+    authMe: "http://localhost:8000/auth/me",
+    adminGuidelines: "http://localhost:8000/admin/guidelines",
+    adminGuidelineUpload: "http://localhost:8000/admin/guidelines/upload",
+    adminGuidelineDownload: function (documentId) {
+      return "http://localhost:8000/admin/guidelines/" + encodeURIComponent(documentId) + "/download";
+    }
   };
 
   const protocols = {
@@ -82,15 +94,48 @@
     }
   };
 
+  const VITAL_INTAKE_STEPS = [
+    { key: "age", label: "Age", prompt: "Capture the patient's age.", placeholder: "e.g. 9 years old" },
+    { key: "weight", label: "Weight", prompt: "Capture the patient's weight.", placeholder: "e.g. 60 pounds" },
+    { key: "heartRate", label: "Heart Rate", prompt: "Capture heart rate.", placeholder: "e.g. 128 bpm" },
+    { key: "bloodPressure", label: "Blood Pressure", prompt: "Capture blood pressure.", placeholder: "e.g. 92/58 mmHg" },
+    { key: "temperature", label: "Temperature", prompt: "Capture temperature.", placeholder: "e.g. 101.3 F" },
+    { key: "respiratoryRate", label: "Respiratory Rate", prompt: "Capture respiratory rate.", placeholder: "e.g. 24 breaths/min" },
+    { key: "oxygen", label: "SpO2", prompt: "Capture oxygen saturation.", placeholder: "e.g. 93%" },
+    { key: "fio2", label: "FiO2", prompt: "Capture FiO2.", placeholder: "e.g. 40%" },
+    { key: "respiratorySupport", label: "Respiratory Support", prompt: "Capture respiratory support type.", placeholder: "e.g. nasal cannula, non-invasive ventilation" },
+    { key: "additionalInfo", label: "Additional Info", prompt: "Capture any additional notes.", placeholder: "e.g. lactate, cultures drawn, delayed capillary refill, lethargic" }
+  ];
+
+  function createBlankIntakeEntries() {
+    return VITAL_INTAKE_STEPS.reduce(function (entries, step) {
+      entries[step.key] = "";
+      return entries;
+    }, {});
+  }
+
+  function createBlankProtocolRecord() {
+    return {
+      transcript: "",
+      statusMessage: "Press Record Voice to capture the patient's vitals.",
+      patient: createBlankPatient(),
+      intakeEntries: createBlankIntakeEntries(),
+      intakeStepIndex: 0
+    };
+  }
+
   const screens = {
+    auth: document.getElementById("screen-auth"),
     home: document.getElementById("screen-home"),
     vitals: document.getElementById("screen-vitals"),
     patient: document.getElementById("screen-patient"),
     steps: document.getElementById("screen-steps"),
     voice: document.getElementById("screen-voice"),
     guidelines: document.getElementById("screen-guidelines"),
-    menu: document.getElementById("screen-menu"),
     settings: document.getElementById("screen-settings"),
+    profile: document.getElementById("screen-profile"),
+    login: document.getElementById("screen-login"),
+    admin: document.getElementById("screen-admin"),
     calculator: document.getElementById("screen-calculator"),
     notes: document.getElementById("screen-notes")
   };
@@ -104,6 +149,8 @@
       temperature: "N/A",
       respiratoryRate: "N/A",
       oxygen: "N/A",
+      fio2: "N/A",
+      respiratorySupport: "N/A",
       additionalInfo: "N/A"
     };
   }
@@ -179,21 +226,19 @@
     screenHistory: [],
     selectedProtocol: "",
     stepCompletion: [],
+    teamAssignments: [],
+    protocolStartTime: null,
+    protocolTimerInterval: null,
+    abxCountdownInterval: null,
     speakerEnabled: true,
     activeAudio: null,
     lastHandledAt: null,
     pendingRecordingTarget: null,
+    pendingProtocolMicSource: null,
+    caseHistory: [],
     protocolData: {
-      "Sepsis": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      },
-      "Septic Shock": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      }
+      "Sepsis": createBlankProtocolRecord(),
+      "Septic Shock": createBlankProtocolRecord()
     },
     chatData: {
       summary: "",
@@ -206,6 +251,11 @@
     },
     settings: {
       micThreshold: 35
+    },
+    auth: {
+      user: null,
+      accessToken: "",
+      refreshToken: ""
     }
   };
 
@@ -223,16 +273,8 @@
 
   function sanitizeProtocolData(protocolData) {
     const fallback = {
-      "Sepsis": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      },
-      "Septic Shock": {
-        transcript: "",
-        statusMessage: "Press Record Voice to capture the patient's vitals.",
-        patient: createBlankPatient()
-      }
+      "Sepsis": createBlankProtocolRecord(),
+      "Septic Shock": createBlankProtocolRecord()
     };
 
     Object.keys(fallback).forEach(function (protocolName) {
@@ -240,7 +282,14 @@
       fallback[protocolName] = {
         transcript: savedRecord && typeof savedRecord.transcript === "string" ? savedRecord.transcript : fallback[protocolName].transcript,
         statusMessage: savedRecord && typeof savedRecord.statusMessage === "string" ? savedRecord.statusMessage : fallback[protocolName].statusMessage,
-        patient: sanitizePatient(savedRecord && savedRecord.patient)
+        patient: sanitizePatient(savedRecord && savedRecord.patient),
+        intakeEntries: Object.assign(
+          createBlankIntakeEntries(),
+          savedRecord && savedRecord.intakeEntries && typeof savedRecord.intakeEntries === "object" ? savedRecord.intakeEntries : {}
+        ),
+        intakeStepIndex: savedRecord && Number.isFinite(Number(savedRecord.intakeStepIndex))
+          ? Math.max(0, Math.min(VITAL_INTAKE_STEPS.length - 1, Number(savedRecord.intakeStepIndex)))
+          : 0
       };
     });
 
@@ -255,6 +304,7 @@
         selectedProtocol: state.selectedProtocol,
         lastHandledAt: state.lastHandledAt,
         protocolData: state.protocolData,
+        caseHistory: state.caseHistory,
         chatData: state.chatData,
         settings: state.settings
       }));
@@ -280,6 +330,18 @@
       state.selectedProtocol = typeof saved.selectedProtocol === "string" ? saved.selectedProtocol : "";
       state.lastHandledAt = typeof saved.lastHandledAt === "string" ? saved.lastHandledAt : null;
       state.protocolData = sanitizeProtocolData(saved.protocolData);
+      state.caseHistory = Array.isArray(saved.caseHistory)
+        ? saved.caseHistory.filter(function (entry) {
+            return entry && typeof entry === "object" && typeof entry.protocol === "string";
+          }).map(function (entry) {
+            return {
+              protocol: entry.protocol,
+              finishedAt: typeof entry.finishedAt === "number" ? entry.finishedAt : Date.now(),
+              completedSteps: Number.isFinite(Number(entry.completedSteps)) ? Number(entry.completedSteps) : 0,
+              totalSteps: Number.isFinite(Number(entry.totalSteps)) ? Number(entry.totalSteps) : 0
+            };
+          }).slice(0, 8)
+        : [];
       state.chatData = {
         summary: saved.chatData && typeof saved.chatData.summary === "string" ? saved.chatData.summary : "",
         response: saved.chatData && typeof saved.chatData.response === "string"
@@ -311,7 +373,124 @@
     }
   }
 
+  function saveAuthSession() {
+    try {
+      if (!state.auth || !state.auth.accessToken || !state.auth.refreshToken) {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+        return;
+      }
+      window.localStorage.setItem(
+        AUTH_STORAGE_KEY,
+        JSON.stringify({
+          user: state.auth.user,
+          accessToken: state.auth.accessToken,
+          refreshToken: state.auth.refreshToken
+        })
+      );
+    } catch (error) {
+      // Ignore storage errors.
+    }
+  }
+
+  function restoreAuthSession() {
+    try {
+      const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      state.auth.user = saved && saved.user && typeof saved.user === "object" ? saved.user : null;
+      state.auth.accessToken = saved && typeof saved.accessToken === "string" ? saved.accessToken : "";
+      state.auth.refreshToken = saved && typeof saved.refreshToken === "string" ? saved.refreshToken : "";
+    } catch (error) {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }
+
+  function clearAuthSession() {
+    state.auth.user = null;
+    state.auth.accessToken = "";
+    state.auth.refreshToken = "";
+    saveAuthSession();
+  }
+
+  function isAuthenticated() {
+    return !!(state.auth && state.auth.accessToken && state.auth.refreshToken);
+  }
+
+  function isAdminUser() {
+    var rolesToCheck = [];
+    if (state.auth && state.auth.user && state.auth.user.role) {
+      rolesToCheck.push(String(state.auth.user.role));
+    }
+    var session = getLoginSession();
+    if (session && session.user && session.user.role) {
+      rolesToCheck.push(String(session.user.role));
+    }
+    if (session && session.role) {
+      rolesToCheck.push(String(session.role));
+    }
+    return rolesToCheck.some(function (role) {
+      return /admin/i.test(role);
+    });
+  }
+
+  function getProfileStorageKey() {
+    if (!state.auth || !state.auth.user) {
+      return null;
+    }
+    var userId = state.auth.user.id || state.auth.user.email;
+    return userId ? ("vitalcare_profile:" + String(userId).toLowerCase()) : null;
+  }
+
+  function applyProfileToUi(profile) {
+    var safeProfile = profile || {};
+    var name = safeProfile.name || "";
+    var role = safeProfile.role || "";
+    var institution = safeProfile.institution || "";
+    var license = safeProfile.license || "";
+
+    document.getElementById("profile-name-input").value = name;
+    document.getElementById("profile-role-input").value = role;
+    document.getElementById("profile-institution-input").value = institution;
+    document.getElementById("profile-license-input").value = license;
+
+    document.getElementById("profile-name-display").textContent = name || "Dr. User";
+    document.getElementById("profile-role-display").textContent = role || "Emergency Medicine";
+  }
+
+  function loadProfileForCurrentUser() {
+    var storageKey = getProfileStorageKey();
+    var accountName = state.auth && state.auth.user && state.auth.user.full_name
+      ? String(state.auth.user.full_name).trim()
+      : "";
+    if (!storageKey) {
+      applyProfileToUi({ name: accountName });
+      return;
+    }
+    try {
+      var saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (saved && typeof saved === "object") {
+        if (!saved.name && accountName) {
+          saved.name = accountName;
+        }
+        applyProfileToUi(saved);
+      } else {
+        applyProfileToUi({ name: accountName });
+      }
+    } catch (e) {
+      applyProfileToUi({ name: accountName });
+    }
+  }
+
   const transcriptPreview = document.getElementById("transcript-preview");
+  const transcriptToggle = document.getElementById("transcript-toggle");
+  const intakeStepCounter = document.getElementById("intake-step-counter");
+  const intakeStepPrompt = document.getElementById("intake-step-prompt");
+  const intakeStepInput = document.getElementById("intake-step-input");
+  const intakeSaveStepButton = document.getElementById("intake-save-step-button");
+  const intakePrevStepButton = document.getElementById("intake-prev-step-button");
+  const intakeNextStepButton = document.getElementById("intake-next-step-button");
+  const intakeStepMicButton = document.getElementById("intake-step-mic-button");
+  const intakeSummaryList = document.getElementById("intake-summary-list");
   const additionalInfo = document.getElementById("additional-info");
   const stepsList = document.getElementById("steps-list");
   const stepsProtocolTitle = document.getElementById("steps-protocol-title");
@@ -325,6 +504,8 @@
   const patientTemp = document.getElementById("patient-temp");
   const patientRr = document.getElementById("patient-rr");
   const patientSpo2 = document.getElementById("patient-spo2");
+  const patientFio2 = document.getElementById("patient-fio2");
+  const patientRespiratorySupport = document.getElementById("patient-respiratory-support");
   const chatFeed = document.getElementById("chat-feed");
   const voiceStatusMessage = document.getElementById("voice-status-message");
   const guidelineImage = document.getElementById("guideline-image");
@@ -333,12 +514,6 @@
   const guidelineLightbox = document.getElementById("guideline-lightbox");
   const guidelineLightboxImage = document.getElementById("guideline-lightbox-image");
   const guidelineLightboxClose = document.getElementById("guideline-lightbox-close");
-  const calculateButton = document.getElementById("calculate-button");
-  const calculatorResult = document.getElementById("calculator-result");
-  const weightInput = document.getElementById("weight-input");
-  const weightInputLabel = document.getElementById("weight-input-label");
-  const bolusInput = document.getElementById("bolus-input");
-  const calculatorDisplay = document.getElementById("calculator-display");
   const textSizeSlider = document.getElementById("text-size-slider");
   const darkModeToggle = document.getElementById("dark-mode-toggle");
   const unitSystemSelect = document.getElementById("unit-system-select");
@@ -359,8 +534,48 @@
   const voiceDebugMeta = document.getElementById("voice-debug-meta");
   const voiceDebugError = document.getElementById("voice-debug-error");
   const voiceDebugBody = document.getElementById("voice-debug-body");
+  const profileLoginStatus = document.getElementById("profile-login-status");
+  const loginNameDisplay = document.getElementById("login-name-display");
+  const loginRoleDisplay = document.getElementById("login-role-display");
+  const loginEmailInput = document.getElementById("login-email-input");
+  const loginPasswordInput = document.getElementById("login-password-input");
+  const loginRememberToggle = document.getElementById("login-remember-toggle");
+  const loginStatusMessage = document.getElementById("login-status-message");
+  const loginSubmitButton = document.getElementById("login-submit-btn");
+  const loginSignoutButton = document.getElementById("login-signout-btn");
+  const adminNameDisplay = document.getElementById("admin-name-display");
+  const adminAccessDisplay = document.getElementById("admin-access-display");
+  const adminUsersCount = document.getElementById("admin-users-count");
+  const adminInstitutionInput = document.getElementById("admin-institution-input");
+  const adminRoleSelect = document.getElementById("admin-role-select");
+  const adminProtocolReviewToggle = document.getElementById("admin-protocol-review-toggle");
+  const adminAuditToggle = document.getElementById("admin-audit-toggle");
+  const adminSaveButton = document.getElementById("admin-save-btn");
+  const adminGuidelineFileInput = document.getElementById("admin-guideline-file");
+  const adminGuidelineFileName = document.getElementById("admin-guideline-file-name");
+  const adminGuidelineUploadButton = document.getElementById("admin-guideline-upload-btn");
+  const adminGuidelineClearButton = document.getElementById("admin-guideline-clear-btn");
+  const adminGuidelineRefreshButton = document.getElementById("admin-guideline-refresh-btn");
+  const adminGuidelineStatus = document.getElementById("admin-guideline-status");
+  const adminGuidelineList = document.getElementById("admin-guideline-list");
+  const profileAdminButton = document.querySelector('.profile-action-card[data-screen-target="admin"]');
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
+  const bottomNav = document.getElementById("bottom-nav");
+  const authTabLogin = document.getElementById("auth-tab-login");
+  const authTabRegister = document.getElementById("auth-tab-register");
+  const authTabs = document.querySelector(".auth-tabs");
+  const authSubtitle = document.getElementById("auth-subtitle");
+  const authStatus = document.getElementById("auth-status");
+  const authLoginForm = document.getElementById("auth-login-form");
+  const authRegisterForm = document.getElementById("auth-register-form");
+  const authLoginEmail = document.getElementById("auth-login-email");
+  const authLoginPassword = document.getElementById("auth-login-password");
+  const authRegisterName = document.getElementById("auth-register-name");
+  const authRegisterEmail = document.getElementById("auth-register-email");
+  const authRegisterPassword = document.getElementById("auth-register-password");
+  const authRegisterConfirm = document.getElementById("auth-register-confirm");
+  const profileLogoutButton = document.getElementById("profile-logout-btn");
   const scalableTextElements = Array.from(document.querySelectorAll(".phone-frame *")).filter(function (element) {
     return !element.matches("i, .fa-solid, .fa-regular, .fa-brands");
   });
@@ -379,8 +594,11 @@
   });
 
   function setMicButtonState(button, state) {
+    var isBox = button && button.classList.contains("chat-mic-box");
     if (state === "recording") {
-      button.innerHTML = '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>';
+      button.innerHTML = isBox
+        ? '<i class="fa-solid fa-stop"></i><span>Stop Recording</span>'
+        : '<i class="fa-solid fa-stop"></i><span class="voice-pad__label">Stop Recording</span>';
       button.setAttribute("aria-label", "Stop recording");
       button.classList.add("voice-pad--recording");
       button.classList.remove("voice-pad--working");
@@ -388,18 +606,49 @@
       return;
     }
     if (state === "transcribing") {
-      button.innerHTML = '<i class="fa-solid fa-wave-square"></i><span class="voice-pad__label">Transcribing...</span>';
+      button.innerHTML = isBox
+        ? '<i class="fa-solid fa-wave-square"></i><span>Transcribing...</span>'
+        : '<i class="fa-solid fa-wave-square"></i><span class="voice-pad__label">Transcribing...</span>';
       button.setAttribute("aria-label", "Transcribing audio");
       button.classList.remove("voice-pad--recording");
       button.classList.add("voice-pad--working");
       button.disabled = true;
       return;
     }
-    button.innerHTML = '<i class="fa-solid fa-microphone"></i><span class="voice-pad__label">Record Voice</span>';
+    button.innerHTML = isBox
+      ? '<i class="fa-solid fa-microphone"></i><span>Record Voice</span>'
+      : '<i class="fa-solid fa-microphone"></i><span class="voice-pad__label">Record Voice</span>';
     button.setAttribute("aria-label", "Start recording");
     button.classList.remove("voice-pad--recording");
     button.classList.remove("voice-pad--working");
     button.disabled = false;
+  }
+
+  function setStepMicButtonState(state) {
+    if (!intakeStepMicButton) {
+      return;
+    }
+    if (state === "recording") {
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-stop"></i>';
+      intakeStepMicButton.setAttribute("aria-label", "Stop step recording");
+      intakeStepMicButton.classList.add("voice-pad--recording");
+      intakeStepMicButton.classList.remove("voice-pad--working");
+      intakeStepMicButton.disabled = false;
+      return;
+    }
+    if (state === "transcribing") {
+      intakeStepMicButton.innerHTML = '<i class="fa-solid fa-wave-square"></i>';
+      intakeStepMicButton.setAttribute("aria-label", "Step audio transcribing");
+      intakeStepMicButton.classList.remove("voice-pad--recording");
+      intakeStepMicButton.classList.add("voice-pad--working");
+      intakeStepMicButton.disabled = true;
+      return;
+    }
+    intakeStepMicButton.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    intakeStepMicButton.setAttribute("aria-label", "Record this step");
+    intakeStepMicButton.classList.remove("voice-pad--recording");
+    intakeStepMicButton.classList.remove("voice-pad--working");
+    intakeStepMicButton.disabled = false;
   }
 
   function renderMicThresholdTester(level) {
@@ -483,15 +732,32 @@
   }
 
   function showScreen(name) {
+    if (!isAuthenticated() && name !== "auth") {
+      name = "auth";
+    }
+    if (name === "admin" && !isAdminUser()) {
+      name = "home";
+    }
     if (name !== "settings") {
       stopMicThresholdTester();
     }
     Object.keys(screens).forEach(function (key) {
       screens[key].classList.toggle("screen--active", key === name);
     });
+    document.querySelectorAll(".bottom-nav__btn[data-screen-target]").forEach(function (button) {
+      const isActive = button.dataset.screenTarget === name;
+      button.classList.toggle("bottom-nav__btn--active", isActive);
+      button.setAttribute("aria-current", isActive ? "page" : "false");
+    });
     state.currentScreen = name;
+    if (name === "profile") {
+      loadProfileForCurrentUser();
+    }
     if (screens[name]) {
       screens[name].scrollTop = 0;
+    }
+    if (bottomNav) {
+      bottomNav.style.display = name === "auth" ? "none" : "flex";
     }
     saveState();
   }
@@ -501,7 +767,28 @@
   }
 
   function getProtocolRecord(protocolName) {
-    return state.protocolData[protocolName] || state.protocolData.Sepsis;
+    var normalized = typeof protocolName === "string" ? protocolName.trim() : "";
+    if (normalized && state.protocolData[normalized]) {
+      return state.protocolData[normalized];
+    }
+    if (state.selectedProtocol && state.protocolData[state.selectedProtocol]) {
+      return state.protocolData[state.selectedProtocol];
+    }
+    return state.protocolData.Sepsis;
+  }
+
+  function startFreshProtocolCase(protocolName) {
+    if (!isProtocolTarget(protocolName)) {
+      return;
+    }
+    state.selectedProtocol = protocolName;
+    state.protocolData[protocolName] = createBlankProtocolRecord();
+    state.stepCompletion = [];
+    state.teamAssignments = [];
+    state.protocolStartTime = null;
+    state.pendingRecordingTarget = null;
+    state.pendingProtocolMicSource = null;
+    state.lastHandledAt = null;
   }
 
   function appendChatMessage(role, text) {
@@ -617,6 +904,7 @@
     state.chatData.debugSnapshot = createBlankDebugSnapshot();
     state.lastHandledAt = null;
     state.pendingRecordingTarget = null;
+    state.pendingProtocolMicSource = null;
     if (state.activeAudio) {
       state.activeAudio.pause();
       state.activeAudio = null;
@@ -627,7 +915,10 @@
 
   function renderMicButtons(uiState) {
     const target = state.pendingRecordingTarget;
-    setMicButtonState(vitalsVoiceButton, isProtocolTarget(target) ? uiState : "idle");
+    const protocolState = isProtocolTarget(target) ? uiState : "idle";
+    const isStepMicActive = state.pendingProtocolMicSource === "step";
+    setMicButtonState(vitalsVoiceButton, isStepMicActive ? "idle" : protocolState);
+    setStepMicButtonState(isStepMicActive ? protocolState : "idle");
     setMicButtonState(voiceScreenButton, target === "voice" ? uiState : "idle");
   }
 
@@ -660,7 +951,7 @@
 
   async function syncLatestVoiceResponse() {
     try {
-      const latestResponse = await fetchJson(API.latestResponse);
+      const latestResponse = await fetchJson(API.latestResponse, undefined, true);
       if (!latestResponse.created_at || latestResponse.created_at !== state.lastHandledAt) {
         return;
       }
@@ -687,16 +978,185 @@
     }
 
     const record = getProtocolRecord(state.selectedProtocol);
+    const savedScroll = screens.vitals.scrollTop;
     transcriptPreview.value = record.transcript;
     voiceStatusMessage.textContent = record.statusMessage;
+    renderIntakeStep(record);
+    renderPatientInfo();
+    screens.vitals.scrollTop = savedScroll;
     saveState();
   }
 
+  function buildTranscriptFromIntake(record) {
+    const entries = (record && record.intakeEntries) || {};
+    const lines = [];
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = String(entries[step.key] || "").trim();
+      if (value) {
+        lines.push(step.label + ": " + value);
+      }
+    });
+    return lines.join(". ");
+  }
+
+  function getCurrentIntakeStep(record) {
+    const safeIndex = Math.max(0, Math.min(VITAL_INTAKE_STEPS.length - 1, Number(record.intakeStepIndex) || 0));
+    record.intakeStepIndex = safeIndex;
+    return VITAL_INTAKE_STEPS[safeIndex];
+  }
+
+  function mergeParsedPatient(targetPatient, parsedPatient) {
+    const merged = sanitizePatient(targetPatient);
+    Object.keys(parsedPatient || {}).forEach(function (key) {
+      const value = parsedPatient[key];
+      if (value && value !== "N/A") {
+        merged[key] = value;
+      }
+    });
+    return merged;
+  }
+
+  function extractIntakeStepValue(stepKey, text) {
+    const parsed = parsePatientTranscript(text);
+    if (stepKey === "additionalInfo") {
+      const notes = (parsed.additionalInfo && parsed.additionalInfo !== "N/A" ? parsed.additionalInfo : text).trim();
+      return notes;
+    }
+    const mapped = parsed[stepKey];
+    if (mapped && mapped !== "N/A") {
+      return mapped;
+    }
+    return String(text || "").trim();
+  }
+
+  function applyIntakeStepFromText(record, rawText) {
+    const step = getCurrentIntakeStep(record);
+    const source = String(rawText || "").trim();
+    if (!source) {
+      return false;
+    }
+
+    const value = extractIntakeStepValue(step.key, source);
+    if (!value) {
+      return false;
+    }
+
+    record.intakeEntries[step.key] = value;
+    record.patient[step.key] = value;
+    record.transcript = buildTranscriptFromIntake(record) || source;
+
+    if (record.intakeStepIndex < VITAL_INTAKE_STEPS.length - 1) {
+      record.intakeStepIndex += 1;
+    }
+    return true;
+  }
+
+  function hasCapturedValue(value) {
+    const normalized = String(value || "").trim();
+    return !!normalized && normalized.toUpperCase() !== "N/A";
+  }
+
+  function findNextMissingIntakeStepIndex(record) {
+    for (let index = 0; index < VITAL_INTAKE_STEPS.length; index += 1) {
+      const stepKey = VITAL_INTAKE_STEPS[index].key;
+      if (!hasCapturedValue(record.intakeEntries[stepKey])) {
+        return index;
+      }
+    }
+    return VITAL_INTAKE_STEPS.length - 1;
+  }
+
+  function applyHybridIntakeFromTranscript(record, rawText) {
+    const source = String(rawText || "").trim();
+    if (!source) {
+      return { updatedCount: 0, nextMissingStep: getCurrentIntakeStep(record) };
+    }
+
+    const parsed = parsePatientTranscript(source);
+    const updatedLabels = [];
+
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = parsed[step.key];
+      if (hasCapturedValue(value)) {
+        record.intakeEntries[step.key] = value;
+        record.patient[step.key] = value;
+        updatedLabels.push(step.label);
+      }
+    });
+
+    if (!updatedLabels.length) {
+      const fallbackSaved = applyIntakeStepFromText(record, source);
+      return {
+        updatedCount: fallbackSaved ? 1 : 0,
+        nextMissingStep: getCurrentIntakeStep(record)
+      };
+    }
+
+    record.intakeStepIndex = findNextMissingIntakeStepIndex(record);
+    record.transcript = buildTranscriptFromIntake(record) || source;
+    return {
+      updatedCount: updatedLabels.length,
+      nextMissingStep: getCurrentIntakeStep(record)
+    };
+  }
+
+  function renderIntakeStep(record) {
+    if (!record) {
+      return;
+    }
+    const step = getCurrentIntakeStep(record);
+    intakeStepCounter.textContent = "Step " + (record.intakeStepIndex + 1) + " of " + VITAL_INTAKE_STEPS.length;
+    intakeStepPrompt.textContent = step.prompt;
+    intakeStepInput.placeholder = step.placeholder;
+    intakeStepInput.value = record.intakeEntries[step.key] || "";
+    intakePrevStepButton.disabled = record.intakeStepIndex <= 0;
+    intakeNextStepButton.disabled = record.intakeStepIndex >= VITAL_INTAKE_STEPS.length - 1;
+
+    intakeSummaryList.innerHTML = "";
+    VITAL_INTAKE_STEPS.forEach(function (item) {
+      const row = document.createElement("div");
+      row.className = "intake-summary__row";
+      const label = document.createElement("span");
+      label.className = "mini-label";
+      label.textContent = item.label;
+      const value = document.createElement("strong");
+      const savedValue = String(record.intakeEntries[item.key] || "").trim();
+      value.textContent = savedValue || "Pending";
+      value.className = savedValue ? "intake-summary__value" : "intake-summary__value intake-summary__value--pending";
+      row.appendChild(label);
+      row.appendChild(value);
+      intakeSummaryList.appendChild(row);
+    });
+  }
+
   function navigateTo(name) {
+    if (name === "admin" && !isAdminUser()) {
+      showScreen("home");
+      refreshHomeDashboard();
+      return;
+    }
     if (state.currentScreen && state.currentScreen !== name) {
       state.screenHistory.push(state.currentScreen);
     }
     showScreen(name);
+
+    if (name === "steps") {
+      startProtocolTimer();
+      var patient = getProtocolRecord(state.selectedProtocol).patient;
+      updateVitalsBar(patient || {});
+    } else {
+      stopProtocolTimer();
+    }
+    if (name === "home") {
+      refreshHomeDashboard();
+    }
+    if (name === "calculator") {
+      var calcScreen = document.getElementById("screen-calculator");
+      if (calcScreen) calcScreen.dispatchEvent(new CustomEvent("calc-enter"));
+    }
+    if (name === "admin") {
+      loadAdminGuidelines();
+    }
   }
 
   function goBack() {
@@ -769,21 +1229,7 @@
     return formatNumber(fahrenheit) + " F";
   }
 
-  function updateCalculatorLabels() {
-    if (unitSystemSelect.value === "metric") {
-      weightInputLabel.textContent = "Patient Weight (kg)";
-      if (!weightInput.dataset.convertedToMetric) {
-        weightInput.value = formatNumber(poundsToKilograms(Number(weightInput.value || 0)));
-        weightInput.dataset.convertedToMetric = "true";
-      }
-    } else {
-      weightInputLabel.textContent = "Patient Weight (lb)";
-      if (weightInput.dataset.convertedToMetric === "true") {
-        weightInput.value = formatNumber(kilogramsToPounds(Number(weightInput.value || 0)));
-        weightInput.dataset.convertedToMetric = "false";
-      }
-    }
-  }
+  function updateCalculatorLabels() { /* replaced by guided dosing calculator */ }
 
   function renderPatientInfo() {
     const patient = getProtocolRecord(state.selectedProtocol).patient;
@@ -794,100 +1240,363 @@
     patientTemp.textContent = formatTemperatureCanonical(patient.temperature);
     patientRr.textContent = patient.respiratoryRate;
     patientSpo2.textContent = patient.oxygen;
+    patientFio2.textContent = patient.fio2;
+    patientRespiratorySupport.textContent = patient.respiratorySupport;
     additionalInfo.value = patient.additionalInfo;
     saveState();
   }
 
-  function appendToCalculator(value) {
-    if (calculatorDisplay.value === "0" || calculatorDisplay.value === "Error") {
-      calculatorDisplay.value = value;
-      return;
+  function updateStepsProgress(steps) {
+    var total = state.stepCompletion.length;
+    var completed = state.stepCompletion.filter(Boolean).length;
+    var pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    var fill = document.getElementById("steps-progress-fill");
+    if (fill) fill.style.width = pct + "%";
+
+    if (total > 0 && completed === total) {
+      stepsProgress.textContent = "Initial Bundle Complete";
+      stepsProgress.style.color = "#2f855a";
+      stepsProgress.style.fontWeight = "700";
+    } else {
+      stepsProgress.textContent = completed + " of " + total + " steps completed";
+      stepsProgress.style.color = "";
+      stepsProgress.style.fontWeight = "";
     }
-    calculatorDisplay.value += value;
-  }
-
-  function clearCalculator() {
-    calculatorDisplay.value = "0";
-  }
-
-  function evaluateCalculator() {
-    try {
-      const sanitized = calculatorDisplay.value.replace(/[^0-9+\-*/.() ]/g, "");
-      const result = Function("return (" + sanitized + ")")();
-      calculatorDisplay.value = Number.isFinite(result) ? String(result) : "Error";
-    } catch (error) {
-      calculatorDisplay.value = "Error";
-    }
-  }
-
-  function updateStepsProgress() {
-    const total = state.stepCompletion.length;
-    const completed = state.stepCompletion.filter(Boolean).length;
-    stepsProgress.textContent = completed + " of " + total + " steps completed";
     finishStepsButton.disabled = total === 0 || completed !== total;
   }
 
-  function toggleStep(index) {
+  var _currentStepsRef = [];
+
+  function toggleStep(index, steps) {
     state.stepCompletion[index] = !state.stepCompletion[index];
-    const card = stepsList.querySelector('[data-step-index="' + index + '"]');
+    var stepsData = steps || _currentStepsRef;
+    var card = stepsList.querySelector('[data-step-index="' + index + '"]');
     if (card) {
-      const complete = state.stepCompletion[index];
+      var complete = state.stepCompletion[index];
       card.classList.toggle("step-card--complete", complete);
       card.setAttribute("aria-pressed", complete ? "true" : "false");
-      const indicator = card.querySelector(".step-number");
+      var indicator = card.querySelector(".step-number");
       if (indicator) {
-        indicator.innerHTML = complete
-          ? '<i class="fa-solid fa-check"></i>'
-          : String(index + 1);
+        indicator.innerHTML = complete ? '<i class="fa-solid fa-check"></i>' : String(index + 1);
       }
+      // Flash animation
+      if (complete) {
+        card.classList.add("step-card--just-completed");
+        setTimeout(function () { card.classList.remove("step-card--just-completed"); }, 700);
+      }
+      // Team assignment
+      if (complete) {
+        var nextRole = (state.stepCompletion.filter(Boolean).length - 1) % TEAM_ROLES.length;
+        state.teamAssignments[index] = nextRole;
+      } else {
+        state.teamAssignments[index] = -1;
+      }
+      renderTeamGrid(stepsData);
     }
-    updateStepsProgress();
+    updateStepsProgress(stepsData);
+  }
+
+  function renderStepsFromData(title, timing, steps, preCompleted) {
+    stepsProtocolTitle.textContent = title;
+    stepsProtocolTiming.textContent = timing;
+    stepsList.innerHTML = "";
+    state.stepCompletion = steps.map(function (_, i) {
+      return Array.isArray(preCompleted) ? !!preCompleted[i] : false;
+    });
+    // Init team assignments: pre-completed steps auto-assign to team members
+    state.teamAssignments = [];
+    var roleIndex = 0;
+    state.stepCompletion.forEach(function (done, i) {
+      if (done) { state.teamAssignments[i] = roleIndex % TEAM_ROLES.length; roleIndex++; }
+      else { state.teamAssignments[i] = -1; }
+    });
+
+    steps.forEach(function (step, index) {
+      var complete = state.stepCompletion[index];
+      var wrapper = document.createElement("button");
+      wrapper.className = "step-card" + (complete ? " step-card--complete" : "");
+      wrapper.type = "button";
+      wrapper.dataset.stepIndex = String(index);
+      wrapper.setAttribute("aria-pressed", complete ? "true" : "false");
+
+      var number = document.createElement("div");
+      number.className = "step-number";
+      number.innerHTML = complete ? '<i class="fa-solid fa-check"></i>' : String(index + 1);
+
+      var body = document.createElement("div");
+      body.className = "step-body";
+
+      var titleEl = document.createElement("h3");
+      titleEl.textContent = step.title;
+      body.appendChild(titleEl);
+
+      if (step.body) {
+        var why = document.createElement("p");
+        why.className = "step-why";
+        why.textContent = step.body;
+        body.appendChild(why);
+      }
+
+
+      wrapper.appendChild(number);
+      wrapper.appendChild(body);
+      wrapper.addEventListener("click", function () { toggleStep(index, steps); });
+      stepsList.appendChild(wrapper);
+    });
+
+    renderTeamGrid(steps);
+    updateStepsProgress(steps);
+    startAbxCountdown(steps);
   }
 
   function renderSteps() {
     const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+    _currentStepsRef = protocol.steps;
+    renderStepsFromData(protocol.title, protocol.timing, protocol.steps);
+  }
+
+  function renderStepsLoading() {
+    const protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
     stepsProtocolTitle.textContent = protocol.title;
-    stepsProtocolTiming.textContent = protocol.timing;
-    stepsList.innerHTML = "";
-    state.stepCompletion = protocol.steps.map(function () {
-      return false;
-    });
-
-    protocol.steps.forEach(function (step, index) {
-      const wrapper = document.createElement("button");
-      wrapper.className = "step-card";
-      wrapper.type = "button";
-      wrapper.dataset.stepIndex = String(index);
-      wrapper.setAttribute("aria-pressed", "false");
-
-      const number = document.createElement("div");
-      number.className = "step-number";
-      number.textContent = String(index + 1);
-
-      const body = document.createElement("div");
-      body.className = "step-body";
-
-      const title = document.createElement("h3");
-      title.textContent = step.title;
-
-      const text = document.createElement("p");
-      text.textContent = step.body;
-
-      body.appendChild(title);
-      body.appendChild(text);
-      wrapper.appendChild(number);
-      wrapper.appendChild(body);
-      wrapper.addEventListener("click", function () {
-        toggleStep(index);
-      });
-      stepsList.appendChild(wrapper);
-    });
-
+    stepsProtocolTiming.textContent = "Generating personalised steps...";
+    stepsList.innerHTML = '<p style="padding:12px;color:var(--muted);font-size:14px;">Analysing patient vitals and generating steps\u2026</p>';
+    state.stepCompletion = [];
     updateStepsProgress();
+  }
+
+  function buildStepsPrompt(patient) {
+    const protocol = state.selectedProtocol || "Sepsis";
+    return [
+      "You are a clinical decision support AI. Based on the patient vitals below, list exactly 5 to 7 numbered action steps a medical team should take within the first 3 hours for " + protocol + ".",
+      "Format EACH step exactly as: [number]. [Short title]: [One or two sentence description].",
+      "Output ONLY the numbered steps. No intro, no conclusion, no extra text.",
+      "",
+      "Patient:",
+      "Age: " + patient.age,
+      "Weight: " + patient.weight,
+      "Heart Rate: " + patient.heartRate,
+      "Blood Pressure: " + patient.bloodPressure,
+      "Temperature: " + patient.temperature,
+      "Respiratory Rate: " + patient.respiratoryRate,
+      "SpO2: " + patient.oxygen,
+      "FiO2: " + patient.fio2,
+      "Respiratory Support: " + patient.respiratorySupport,
+      "Additional Notes: " + patient.additionalInfo
+    ].join("\n");
+  }
+
+  // Keywords that indicate a step has already been completed based on patient data
+  var STEP_COMPLETION_SIGNALS = [
+    { keywords: ["lactate", "serum lactate", "lactic acid"],        stepPatterns: [/lactate/i] },
+    { keywords: ["blood culture", "cultures drawn", "culture"],     stepPatterns: [/blood culture/i, /cultures/i] },
+    { keywords: ["antibiotic", "abx", "vanc", "pip", "mero"],      stepPatterns: [/antibiotic/i, /antimicrobial/i] },
+    { keywords: ["fluid bolus", "bolus given", "litre", "liter", "iv fluid", "normal saline", "ns bolus", "lactated"],
+                                                                    stepPatterns: [/fluid/i, /resuscitat/i, /bolus/i] },
+    { keywords: ["iv access", "iv line", "peripheral iv", "central line", "piv"],
+                                                                    stepPatterns: [/iv access/i, /vascular access/i, /access/i] },
+    { keywords: ["ecg", "ekg", "12-lead", "twelve lead"],           stepPatterns: [/ecg/i, /ekg/i, /cardiac monitor/i] },
+    { keywords: ["chest x-ray", "chest xray", "cxr"],              stepPatterns: [/chest x.ray/i, /cxr/i, /imaging/i] },
+    { keywords: ["urine output", "foley", "catheter", "uop"],       stepPatterns: [/urine/i, /foley/i, /output monitor/i] },
+    { keywords: ["o2", "oxygen", "nasal cannula", "face mask", "non-rebreather", "high flow"],
+                                                                    stepPatterns: [/oxygen/i, /o2/i, /supplemental/i] },
+  ];
+
+  function detectCompletedSteps(patient, steps) {
+    var transcript = (getProtocolRecord(state.selectedProtocol).transcript || "").toLowerCase();
+    var notes = (patient.additionalInfo || "").toLowerCase();
+    var combined = transcript + " " + notes;
+
+    return steps.map(function (step) {
+      var stepText = (step.title + " " + step.body).toLowerCase();
+      return STEP_COMPLETION_SIGNALS.some(function (signal) {
+        // Does the step match this signal?
+        var stepMatches = signal.stepPatterns.some(function (p) { return p.test(stepText); });
+        if (!stepMatches) return false;
+        // Was this already reported in the patient data?
+        return signal.keywords.some(function (kw) { return combined.indexOf(kw) !== -1; });
+      });
+    });
+  }
+
+  function parseLLMSteps(text) {
+    // If the response has a STEPS: section, extract only that part
+    var stepsMatch = text.match(/STEPS:\s*\n([\s\S]*)/i);
+    var source = stepsMatch ? stepsMatch[1] : text;
+
+    var lines = source.split("\n").map(function (l) { return l.trim(); }).filter(Boolean);
+    var steps = [];
+    var current = null;
+
+    lines.forEach(function (line) {
+      // Match "1. Title: body" or "1. **Title**: body" or "1. Title"
+      var m = line.match(/^\d+[.)]\s+(?:\*{1,2})?([^*\n]+?)(?:\*{1,2})?\s*(?::\s*(.+))?$/);
+      if (m) {
+        if (current) { steps.push(current); }
+        var title = m[1].trim().replace(/\s*\[\d+\]\s*$/, ""); // strip trailing citations
+        var body = m[2] ? m[2].trim().replace(/\s*\[\d+\]\s*/g, "") : "";
+        current = { title: title, body: body };
+      } else if (current && !/^(SUMMARY|CONDITION|SUPPORTED_CONCERN|STEPS):/i.test(line)) {
+        current.body = (current.body ? current.body + " " : "") + line;
+      }
+    });
+
+    if (current) { steps.push(current); }
+    return steps.length ? steps : null;
   }
 
   function formatPounds(value) {
     return formatNumber(value) + " lbs";
+  }
+
+  // ── Protocol timer ──────────────────────────────────────────────────────
+  function startProtocolTimer() {
+    stopProtocolTimer();
+    state.protocolStartTime = Date.now();
+    var timerEl = document.getElementById("protocol-timer");
+    state.protocolTimerInterval = setInterval(function () {
+      var elapsed = Math.floor((Date.now() - state.protocolStartTime) / 1000);
+      var m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+      var s = String(elapsed % 60).padStart(2, "0");
+      if (timerEl) timerEl.textContent = m + ":" + s;
+    }, 1000);
+  }
+
+  function stopProtocolTimer() {
+    if (state.protocolTimerInterval) {
+      clearInterval(state.protocolTimerInterval);
+      state.protocolTimerInterval = null;
+    }
+    if (state.abxCountdownInterval) {
+      clearInterval(state.abxCountdownInterval);
+      state.abxCountdownInterval = null;
+    }
+  }
+
+  // ── Antibiotic countdown (3-hour window from protocol start) ─────────────
+  function startAbxCountdown(steps) {
+    var hasAbxStep = steps.some(function (s, i) {
+      return /antibiotic|antimicrobial|abx/i.test(s.title + " " + s.body) && !state.stepCompletion[i];
+    });
+    var card = document.getElementById("abx-deadline-card");
+    if (!card) return;
+    if (!hasAbxStep) { card.classList.add("is-hidden"); return; }
+    card.classList.remove("is-hidden");
+
+    var THREE_HOURS = 3 * 60 * 60 * 1000;
+    if (state.abxCountdownInterval) clearInterval(state.abxCountdownInterval);
+    state.abxCountdownInterval = setInterval(function () {
+      var elapsed = Date.now() - (state.protocolStartTime || Date.now());
+      var remaining = Math.max(0, THREE_HOURS - elapsed);
+      var totalSec = Math.floor(remaining / 1000);
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = totalSec % 60;
+      var display = h + "h " + String(m).padStart(2, "0") + "m " + String(s).padStart(2, "0") + "s";
+      var el = document.getElementById("abx-countdown");
+      if (el) el.textContent = display;
+      if (remaining === 0) {
+        clearInterval(state.abxCountdownInterval);
+        if (el) el.textContent = "OVERDUE";
+        if (el) el.style.color = "#c53030";
+      }
+    }, 1000);
+  }
+
+  // ── Vitals bar ────────────────────────────────────────────────────────────
+  var VITAL_THRESHOLDS = {
+    hr:   { critical: [0, 50, 130, 999], warning: [50, 60, 110, 130] },
+    bp:   { critical: [0, 70],            warning: [70, 90] },   // systolic
+    temp: { critical: [0, 95, 104.5, 999], warning: [95, 97.5, 101, 104.5] },
+    spo2: { critical: [0, 90],            warning: [90, 95] },
+  };
+
+  function vitalStatus(type, rawValue) {
+    var n = parseFloat(String(rawValue).replace(/[^\d.]/g, ""));
+    if (isNaN(n)) return "";
+    var t = VITAL_THRESHOLDS[type];
+    if (!t) return "";
+    if (type === "hr" || type === "temp") {
+      if (n < t.critical[1] || n > t.critical[2]) return "critical";
+      if (n < t.warning[1] || n > t.warning[2]) return "warning";
+      return "normal";
+    }
+    // bp and spo2: critical below threshold, warning in middle
+    if (n < t.critical[1]) return "critical";
+    if (n < t.warning[1])  return "warning";
+    return "normal";
+  }
+
+  function updateVitalsBar(patient) {
+    var fields = [
+      { id: "bar-hr",   value: patient.heartRate,    type: "hr" },
+      { id: "bar-bp",   value: patient.bloodPressure, type: "bp" },
+      { id: "bar-temp", value: patient.temperature,   type: "temp" },
+      { id: "bar-spo2", value: patient.oxygen,        type: "spo2" },
+    ];
+    fields.forEach(function (f) {
+      var el = document.getElementById(f.id);
+      if (!el) return;
+      var display = (f.value && f.value !== "N/A") ? f.value : "—";
+      el.textContent = display;
+      el.className = "vitals-bar__value";
+      if (display !== "—") {
+        var status = vitalStatus(f.type, f.value);
+        if (status) el.classList.add("vitals-bar__value--" + status);
+      }
+    });
+    // Set urgency banner protocol name
+    var nameEl = document.getElementById("urgency-protocol-name");
+    if (nameEl) nameEl.textContent = (state.selectedProtocol || "PROTOCOL").toUpperCase() + " ACTIVE";
+  }
+
+  // ── Step sub-actions ──────────────────────────────────────────────────────
+  var STEP_SUB_ACTIONS = [
+    { pattern: /lactate|lactic acid/i,            actions: ["Order lab", "Receive result"] },
+    { pattern: /blood culture|culture/i,           actions: ["Collect sample", "Sent to lab"] },
+    { pattern: /antibiotic|antimicrobial|abx/i,    actions: ["Order", "Administer"] },
+    { pattern: /fluid|bolus|resuscitat/i,          actions: ["Order bolus", "Running"] },
+    { pattern: /iv access|vascular access|access/i, actions: ["Establish IV"] },
+    { pattern: /oxygen|o2|supplemental/i,          actions: ["Apply O2", "Confirm SpO2 improving"] },
+    { pattern: /picu|icu|escalat/i,                actions: ["Page team", "Team en route"] },
+    { pattern: /vasopressor|norepinephrine|epi/i,  actions: ["Order", "Infusing"] },
+  ];
+
+  function getSubActions(stepTitle, stepBody) {
+    var text = (stepTitle + " " + stepBody).toLowerCase();
+    for (var i = 0; i < STEP_SUB_ACTIONS.length; i++) {
+      if (STEP_SUB_ACTIONS[i].pattern.test(text)) return STEP_SUB_ACTIONS[i].actions;
+    }
+    return ["Done"];
+  }
+
+  // ── Team assignments ──────────────────────────────────────────────────────
+  var TEAM_ROLES = ["Attending", "Resident", "Nurse 1", "Nurse 2"];
+
+  function renderTeamGrid(steps) {
+    var grid = document.getElementById("team-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+    TEAM_ROLES.forEach(function (role, i) {
+      var assignedIndex = state.teamAssignments.indexOf(i);
+      var member = document.createElement("div");
+      member.className = "team-member" + (assignedIndex !== -1 ? " team-member--active" : "");
+      var roleEl = document.createElement("span");
+      roleEl.className = "team-member__role";
+      roleEl.textContent = role;
+      var taskEl = document.createElement("span");
+      taskEl.className = "team-member__task";
+      if (assignedIndex !== -1 && steps[assignedIndex]) {
+        taskEl.textContent = steps[assignedIndex].title;
+      } else {
+        taskEl.textContent = "Ready";
+        taskEl.style.color = "var(--muted)";
+        taskEl.style.fontWeight = "400";
+      }
+      member.appendChild(roleEl);
+      member.appendChild(taskEl);
+      grid.appendChild(member);
+    });
   }
 
   function getLastMatch(text, pattern) {
@@ -895,8 +1604,31 @@
     return matches.length ? matches[matches.length - 1] : null;
   }
 
+  function normalizeNumbers(text) {
+    var ones = {
+      zero:0, one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8,
+      nine:9, ten:10, eleven:11, twelve:12, thirteen:13, fourteen:14, fifteen:15,
+      sixteen:16, seventeen:17, eighteen:18, nineteen:19, twenty:20,
+      thirty:30, forty:40, fifty:50, sixty:60, seventy:70, eighty:80, ninety:90
+    };
+    // "102 point 4" / "98 decimal 6"
+    text = text.replace(/\b(\w+)\s+(?:point|decimal)\s+(\w+)\b/gi, function(m, a, b) {
+      var na = ones[a.toLowerCase()], nb = ones[b.toLowerCase()];
+      return (na !== undefined && nb !== undefined) ? na + "." + nb : m;
+    });
+    // replace individual word numbers
+    Object.keys(ones).forEach(function(word) {
+      text = text.replace(new RegExp("\\b" + word + "\\b", "gi"), String(ones[word]));
+    });
+    // combine tens+ones written as two tokens: "80 5" → "85"
+    text = text.replace(/\b([2-9]0)\s+([1-9])\b/g, function(m, t, u) { return String(+t + +u); });
+    // hundreds: "1 100" → "100"
+    text = text.replace(/\b([1-9])\s+100\b/g, function(m, n) { return String(+n * 100); });
+    return text;
+  }
+
   function parsePatientTranscript(text) {
-    const normalized = text.toLowerCase();
+    const normalized = normalizeNumbers(text.toLowerCase());
     const patient = createBlankPatient();
 
     const NUM = "(?:is|of|at|:)?\\s*(\\d+(?:\\.\\d+)?)";
@@ -911,6 +1643,9 @@
                      getLastMatch(normalized, /(\d+(?:\.\d+)?)\s*(f|fahrenheit|c|celsius)\b/g);
     const rrMatch = getLastMatch(normalized, new RegExp("(?:respiration rate|respiratory rate|rr)\\s+" + NUM, "g"));
     const spo2Match = getLastMatch(normalized, new RegExp("(?:spo2|sp o2|oxygen saturation|oxygen)\\s+" + NUM, "g"));
+    const fio2Match = getLastMatch(normalized, /(?:fio2|fi o2|fraction of inspired oxygen)\s+(?:is|of|at|:)?\s*(\d+(?:\.\d+)?)\s*%?/g);
+    const supportMatch = getLastMatch(normalized, /(?:respiratory support|oxygen support|support type|airway support)\s+(?:is|of|at|:)?\s*([a-z0-9\- ]+)/g) ||
+                         getLastMatch(normalized, /\b(nasal cannula|high[- ]flow nasal cannula|non[- ]invasive ventilation|cpap|bipap|non[- ]rebreather|simple face mask|room air|mechanical ventilation|intubated)\b/g);
 
     if (ageMatch) patient.age = ageMatch[1];
     if (weightMatch) {
@@ -932,12 +1667,106 @@
     }
     if (rrMatch) patient.respiratoryRate = rrMatch[1] + " breaths/min";
     if (spo2Match) patient.oxygen = spo2Match[1] + "%";
+    if (fio2Match) patient.fio2 = fio2Match[1] + "%";
+    if (supportMatch) patient.respiratorySupport = (supportMatch[1] || supportMatch[0] || "").trim();
+
+    // Extract additional clinical notes — anything that isn't a vital reading
+    var vitalSegmentPatterns = [
+      /heart rate|heart-rate|\bhr\b/,
+      /blood pressure|\bbp\b/,
+      /temperature|\btemp\b/,
+      /respiratory rate|respiration rate|\brr\b/,
+      /oxygen saturation|spo2|sp o2/,
+      /fio2|fi o2|fraction of inspired oxygen/,
+      /respiratory support|oxygen support|support type|nasal cannula|high[- ]flow|cpap|bipap|non[- ]rebreather|room air|mechanical ventilation|intubated/,
+      /\d+\s*bpm/,
+      /\d+\s*(?:\/|over)\s*\d+/,
+      /\d+(?:\.\d+)?\s*(?:degrees?|fahrenheit|celsius)/,
+      /\byears?\s*old\b|\byrs?\b|\by\/o\b/,
+      /\d+\s*(?:lbs?|pounds?|kg)/,
+      /weighs?/,
+    ];
+    var segments = text.split(/[.,]+/).map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 4; });
+    var labeledFieldPrefix = /^(?:age|weight|heart rate|hr|blood pressure|bp|temperature|temp|respiratory rate|respiration rate|rr|oxygen saturation|spo2|sp o2|fio2|fi o2|respiratory support|additional info)\s*:/i;
+    var notesSegments = segments.filter(function(seg) {
+      var segLower = seg.toLowerCase();
+      if (labeledFieldPrefix.test(seg)) {
+        return false;
+      }
+      return !vitalSegmentPatterns.some(function(p) { return p.test(segLower); });
+    });
+    if (notesSegments.length) {
+      patient.additionalInfo = notesSegments.join(". ").replace(/\.\s*\./g, ".").trim();
+    }
 
     return patient;
   }
 
-  async function fetchJson(url, options) {
-    const response = await fetch(url, options);
+  // ── Live browser transcription (interim display only) ────────────────────
+  var liveRecognition = null;
+  var liveRecognitionTarget = null;
+  var liveRecognitionFinal = "";
+
+  function stopLiveTranscript() {
+    if (liveRecognition) {
+      liveRecognition.onresult = null;
+      liveRecognition.onend = null;
+      liveRecognition.onerror = null;
+      try { liveRecognition.stop(); } catch (e) {}
+      liveRecognition = null;
+    }
+    liveRecognitionTarget = null;
+    liveRecognitionFinal = "";
+  }
+
+  function startLiveTranscript(target) {
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { return; }
+
+    stopLiveTranscript();
+    liveRecognitionTarget = target;
+    liveRecognitionFinal = "";
+
+    liveRecognition = new SpeechRecognition();
+    liveRecognition.continuous = true;
+    liveRecognition.interimResults = true;
+    liveRecognition.lang = "en-US";
+
+    liveRecognition.onresult = function (event) {
+      var finalParts = "";
+      var interimPart = "";
+      for (var i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalParts += event.results[i][0].transcript;
+        } else {
+          interimPart += event.results[i][0].transcript;
+        }
+      }
+      liveRecognitionFinal = finalParts;
+      var display = (finalParts + (interimPart ? " " + interimPart : "")).trim();
+      if (isProtocolTarget(liveRecognitionTarget)) {
+        transcriptPreview.value = display;
+      }
+    };
+
+    liveRecognition.onerror = function () { stopLiveTranscript(); };
+    liveRecognition.onend = function () {
+      // Auto-restart while we're still recording so it doesn't time out
+      if (liveRecognition) {
+        try { liveRecognition.start(); } catch (e) {}
+      }
+    };
+
+    try { liveRecognition.start(); } catch (e) { stopLiveTranscript(); }
+  }
+
+  async function fetchJson(url, options, requireAuth) {
+    const baseOptions = options || {};
+    const headers = Object.assign({}, baseOptions.headers || {});
+    if (requireAuth && state.auth.accessToken) {
+      headers.Authorization = "Bearer " + state.auth.accessToken;
+    }
+    const response = await fetch(url, Object.assign({}, baseOptions, { headers: headers }));
     if (!response.ok) {
       const payload = await response.json().catch(function () {
         return {};
@@ -947,10 +1776,299 @@
     return response.json();
   }
 
+  function setAuthStatus(message, isError) {
+    if (!authStatus) return;
+    authStatus.textContent = message || "";
+    authStatus.style.color = isError ? "#c53030" : "var(--text-muted)";
+  }
+
+  function setAuthMode(mode) {
+    const loginMode = mode !== "register";
+    authTabLogin.classList.toggle("auth-tab--active", loginMode);
+    authTabRegister.classList.toggle("auth-tab--active", !loginMode);
+    if (authTabs) {
+      authTabs.classList.toggle("auth-tabs--register", !loginMode);
+    }
+    authLoginForm.classList.toggle("is-hidden", !loginMode);
+    authRegisterForm.classList.toggle("is-hidden", loginMode);
+    if (authSubtitle) {
+      authSubtitle.textContent = loginMode
+        ? "Sign in to access patient protocols and tools."
+        : "Create your clinician account to continue.";
+    }
+    setAuthStatus("", false);
+  }
+
+  function resetAuthForms() {
+    if (authLoginForm) authLoginForm.reset();
+    if (authRegisterForm) authRegisterForm.reset();
+  }
+
+  async function handleLoginSubmit(event) {
+    event.preventDefault();
+    setAuthStatus("Signing in...", false);
+    try {
+      const payload = await fetchJson(
+        API.authLogin,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: authLoginEmail.value.trim(),
+            password: authLoginPassword.value
+          })
+        },
+        false
+      );
+      state.auth.user = payload.user || null;
+      state.auth.accessToken = payload.access_token || "";
+      state.auth.refreshToken = payload.refresh_token || "";
+      saveAuthSession();
+      loadProfileForCurrentUser();
+      renderLoginState();
+      ensureSyncLoops();
+      setAuthStatus("", false);
+      showScreen("home");
+      refreshHomeDashboard();
+    } catch (error) {
+      setAuthStatus(error.message || "Login failed.", true);
+    }
+  }
+
+  async function handleRegisterSubmit(event) {
+    event.preventDefault();
+    const password = authRegisterPassword.value;
+    const confirm = authRegisterConfirm.value;
+    if (password !== confirm) {
+      setAuthStatus("Passwords do not match.", true);
+      return;
+    }
+    setAuthStatus("Creating account...", false);
+    try {
+      const payload = await fetchJson(
+        API.authRegister,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: authRegisterEmail.value.trim(),
+            password: password,
+            full_name: authRegisterName.value.trim() || null
+          })
+        },
+        false
+      );
+      state.auth.user = payload.user || null;
+      state.auth.accessToken = payload.access_token || "";
+      state.auth.refreshToken = payload.refresh_token || "";
+      saveAuthSession();
+      loadProfileForCurrentUser();
+      renderLoginState();
+      ensureSyncLoops();
+      setAuthStatus("", false);
+      showScreen("home");
+      refreshHomeDashboard();
+    } catch (error) {
+      setAuthStatus(error.message || "Registration failed.", true);
+    }
+  }
+
+  async function performLogout() {
+    try {
+      if (state.auth.accessToken) {
+        await fetchJson(API.authLogout, { method: "POST" }, true);
+      }
+    } catch (error) {
+      // Ignore backend logout errors and continue with local logout.
+    }
+    clearAuthSession();
+    resetAuthForms();
+    setAuthMode("login");
+    renderLoginState();
+    showScreen("auth");
+  }
+
+  function getAdminAuthHeaders() {
+    var session = getLoginSession();
+    var token = session && (session.token || session.access_token || session.accessToken);
+    return token ? { Authorization: "Bearer " + token } : {};
+  }
+
+  async function loginWithBackend(email, password) {
+    var response = await fetch(API.authLogin, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, password: password })
+    });
+
+    if (response.status === 404 || response.status === 405) {
+      return null;
+    }
+    if (!response.ok) {
+      var payload = await response.json().catch(function () {
+        return {};
+      });
+      throw new Error(payload.detail || "Login failed.");
+    }
+    return response.json();
+  }
+
+  function renderGuidelineStatus(message, isSuccess) {
+    adminGuidelineStatus.textContent = message;
+    adminGuidelineStatus.classList.toggle("login-status-panel--success", !!isSuccess);
+  }
+
+  function formatGuidelineDate(value) {
+    if (!value) {
+      return "No upload date";
+    }
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    return date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function renderAdminGuidelines(items) {
+    adminGuidelineList.innerHTML = "";
+    if (!items || !items.length) {
+      var empty = document.createElement("div");
+      empty.className = "admin-guideline-empty";
+      empty.textContent = "No indexed guideline PDFs yet.";
+      adminGuidelineList.appendChild(empty);
+      return;
+    }
+
+    items.forEach(function (item) {
+      var row = document.createElement("article");
+      row.className = "admin-guideline-row";
+
+      var copy = document.createElement("div");
+      copy.className = "admin-guideline-row__copy";
+
+      var title = document.createElement("strong");
+      title.textContent = item.document_name || item.title || "Guideline PDF";
+
+      var meta = document.createElement("small");
+      meta.textContent = [
+        item.protocol_version ? "v" + item.protocol_version : null,
+        item.status || null,
+        item.total_chunks ? item.total_chunks + " chunks" : null,
+        formatGuidelineDate(item.uploaded_at)
+      ].filter(Boolean).join(" · ");
+
+      copy.appendChild(title);
+      copy.appendChild(meta);
+
+      if (item.notification_message) {
+        var alert = document.createElement("small");
+        alert.className = "admin-guideline-row__alert";
+        alert.textContent = item.notification_message;
+        copy.appendChild(alert);
+      }
+
+      var download = document.createElement("button");
+      download.className = "admin-guideline-download";
+      download.type = "button";
+      download.setAttribute("aria-label", "Download " + (item.document_name || "guideline PDF"));
+      download.innerHTML = '<i class="fa-solid fa-download"></i>';
+      download.addEventListener("click", function () {
+        downloadAdminGuideline(item);
+      });
+
+      row.appendChild(copy);
+      row.appendChild(download);
+      adminGuidelineList.appendChild(row);
+    });
+  }
+
+  async function downloadAdminGuideline(item) {
+    renderGuidelineStatus("Preparing " + (item.document_name || "guideline PDF") + " for download...", false);
+    try {
+      var response = await fetch(API.adminGuidelineDownload(item.document_id), {
+        headers: getAdminAuthHeaders()
+      });
+      if (!response.ok) {
+        var payload = await response.json().catch(function () {
+          return {};
+        });
+        throw new Error(payload.detail || "Download failed.");
+      }
+      var blob = await response.blob();
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = item.document_name || "guideline.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      renderGuidelineStatus("Downloaded " + (item.document_name || "guideline PDF") + ".", true);
+    } catch (error) {
+      renderGuidelineStatus(error.message || "Download failed.", false);
+    }
+  }
+
+  async function loadAdminGuidelines() {
+    renderGuidelineStatus("Loading indexed guideline PDFs...", false);
+    try {
+      var result = await fetchJson(API.adminGuidelines, {
+        headers: getAdminAuthHeaders()
+      });
+      renderAdminGuidelines(result.items || []);
+      renderGuidelineStatus("Guideline list is up to date.", true);
+    } catch (error) {
+      renderAdminGuidelines([]);
+      renderGuidelineStatus(error.message || "Could not load guidelines.", false);
+    }
+  }
+
+  function clearAdminGuidelineFile() {
+    adminGuidelineFileInput.value = "";
+    adminGuidelineFileName.textContent = "Select PDF guideline";
+    renderGuidelineStatus("No PDF selected.", false);
+  }
+
+  async function uploadAdminGuideline() {
+    var file = adminGuidelineFileInput.files && adminGuidelineFileInput.files[0];
+    if (!file) {
+      renderGuidelineStatus("Choose a PDF guideline before uploading.", false);
+      return;
+    }
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+      renderGuidelineStatus("Only PDF guideline files can be uploaded.", false);
+      return;
+    }
+
+    var formData = new FormData();
+    formData.append("file", file);
+    adminGuidelineUploadButton.disabled = true;
+    renderGuidelineStatus("Uploading and indexing " + file.name + " into RAG...", false);
+
+    try {
+      var result = await fetchJson(API.adminGuidelineUpload, {
+        method: "POST",
+        headers: getAdminAuthHeaders(),
+        body: formData
+      });
+      clearAdminGuidelineFile();
+      renderGuidelineStatus(
+        "Uploaded " + (result.document_name || file.name) + " as guideline version " + (result.protocol_version || "new") + ".",
+        true
+      );
+      await loadAdminGuidelines();
+    } catch (error) {
+      renderGuidelineStatus(error.message || "Guideline upload failed.", false);
+    } finally {
+      adminGuidelineUploadButton.disabled = false;
+    }
+  }
+
   async function toggleRecording(target) {
     try {
       state.pendingRecordingTarget = target;
-      const result = await fetchJson(API.toggle, { method: "POST" });
+      const toggleUrl = isProtocolTarget(target) ? API.toggleSttOnly : API.toggle;
+      const result = await fetchJson(toggleUrl, { method: "POST" }, true);
       if (result.state === "recording_started") {
         renderMicButtons("recording");
         if (isProtocolTarget(target)) {
@@ -982,6 +2100,7 @@
       }
       if (result.state === "no_audio") {
         state.pendingRecordingTarget = null;
+        state.pendingProtocolMicSource = null;
         renderMicButtons("idle");
         if (isProtocolTarget(target)) {
           getProtocolRecord(target).statusMessage = "No audio captured. Please try again.";
@@ -994,6 +2113,7 @@
     } catch (error) {
       const failedTarget = target;
       state.pendingRecordingTarget = null;
+      state.pendingProtocolMicSource = null;
       renderMicButtons("idle");
       if (isProtocolTarget(failedTarget)) {
         getProtocolRecord(failedTarget).statusMessage = error.message;
@@ -1007,7 +2127,7 @@
 
   async function syncRecordingStatus() {
     try {
-      const status = await fetchJson(API.status);
+      const status = await fetchJson(API.status, undefined, true);
       const uiState = status.recording ? "recording" : (status.transcribing ? "transcribing" : "idle");
       renderMicButtons(uiState);
 
@@ -1048,7 +2168,7 @@
 
   async function syncLatestResult() {
     try {
-      const latest = await fetchJson(API.latestTranscription);
+      const latest = await fetchJson(API.latestTranscription, undefined, true);
       if (!latest.created_at || latest.created_at === state.lastHandledAt) {
         return;
       }
@@ -1079,16 +2199,42 @@
       } else if (isProtocolTarget(target)) {
         const record = getProtocolRecord(target);
         record.transcript = latest.text || "";
-        record.patient = parsePatientTranscript(record.transcript);
-        record.statusMessage = "Vitals captured. Review the transcript below.";
+        intakeStepInput.value = record.transcript;
+        if (record.transcript) {
+          const intakeResult = applyHybridIntakeFromTranscript(record, record.transcript);
+          if (intakeResult.updatedCount > 1) {
+            record.statusMessage = "Saved " + intakeResult.updatedCount + " fields from recording. Next: " + intakeResult.nextMissingStep.label + ".";
+          } else if (intakeResult.updatedCount === 1) {
+            record.statusMessage = "Saved one field from recording. Next: " + intakeResult.nextMissingStep.label + ".";
+          } else {
+            const parsedFromTranscript = parsePatientTranscript(record.transcript);
+            record.patient = mergeParsedPatient(record.patient, parsedFromTranscript);
+            record.statusMessage = "Recording captured, but no structured fields were detected. Please type or retry this step.";
+          }
+          record.transcript = buildTranscriptFromIntake(record) || record.transcript;
+        }
+
         if (latest.llm_response) {
           record.patient.additionalInfo = latest.llm_response;
+          record.intakeEntries.additionalInfo = latest.llm_response;
+          record.transcript = buildTranscriptFromIntake(record) || record.transcript;
+          record.statusMessage = "Vitals captured. Review the transcript below.";
+          state.lastHandledAt = latest.created_at;
+          state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
+          renderMicButtons("idle");
+        } else {
+          state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
+          renderMicButtons("idle");
         }
         renderVitalsView();
         renderPatientInfo();
+        return;
       }
 
       state.pendingRecordingTarget = null;
+      state.pendingProtocolMicSource = null;
       renderMicButtons("idle");
     } catch (error) {
       if (!/No transcription has been published yet/i.test(error.message)) {
@@ -1101,6 +2247,16 @@
         }
       }
     }
+  }
+
+  var syncLoopsStarted = false;
+  function ensureSyncLoops() {
+    if (syncLoopsStarted) return;
+    syncLoopsStarted = true;
+    syncRecordingStatus();
+    syncLatestResult();
+    window.setInterval(syncRecordingStatus, 1500);
+    window.setInterval(syncLatestResult, 1500);
   }
 
   async function submitVoiceText() {
@@ -1122,7 +2278,7 @@
           "Content-Type": "application/json"
         },
         body: JSON.stringify({ text: message })
-      });
+      }, true);
 
       state.lastHandledAt = result.created_at || state.lastHandledAt;
       state.chatData.summary = result.text || message;
@@ -1147,6 +2303,17 @@
     }
   }
 
+  authTabLogin.addEventListener("click", function () {
+    setAuthMode("login");
+  });
+
+  authTabRegister.addEventListener("click", function () {
+    setAuthMode("register");
+  });
+
+  authLoginForm.addEventListener("submit", handleLoginSubmit);
+  authRegisterForm.addEventListener("submit", handleRegisterSubmit);
+
   document.querySelectorAll("[data-protocol]").forEach(function (button) {
     button.addEventListener("click", function () {
       state.selectedProtocol = button.dataset.protocol;
@@ -1169,11 +2336,6 @@
     });
   });
 
-  document.querySelectorAll("[data-open-menu]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      navigateTo("menu");
-    });
-  });
 
   document.querySelectorAll("[data-back-button]").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -1182,31 +2344,266 @@
   });
 
   document.getElementById("open-menu-button").addEventListener("click", function () {
-    navigateTo("menu");
+    navigateTo("profile");
   });
+
+  // ── Home dashboard ────────────────────────────────────────────────────────
+  // Live clock
+  function startHomeClock() {
+    var clockEl = document.getElementById("home-live-clock");
+    function tick() {
+      if (clockEl) {
+        var now = new Date();
+        clockEl.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+  startHomeClock();
+
+
+  // Populate home vitals from last patient record
+  function refreshHomeDashboard() {
+    // Find most recent protocol with patient data
+    var latestProtocol = null;
+    var latestPatient = null;
+    Object.keys(state.protocolData).forEach(function (name) {
+      var record = state.protocolData[name];
+      if (record.patient && record.patient.heartRate && record.patient.heartRate !== "N/A") {
+        latestProtocol = name;
+        latestPatient = record.patient;
+      }
+    });
+
+    if (latestPatient) {
+      var vitals = [
+        { id: "home-hr",   labelId: "home-hr-label",   value: latestPatient.heartRate,    type: "hr" },
+        { id: "home-bp",   labelId: "home-bp-label",   value: latestPatient.bloodPressure, type: "bp" },
+        { id: "home-temp", labelId: "home-temp-label", value: latestPatient.temperature,   type: "temp" },
+        { id: "home-spo2", labelId: "home-spo2-label", value: latestPatient.oxygen,        type: "spo2" },
+      ];
+      var VITAL_LABELS = {
+        hr:   function (s) { return s === "critical" ? "High" : s === "warning" ? "Elevated" : "Normal"; },
+        bp:   function (s) { return s === "critical" ? "Low"  : s === "warning" ? "Low"      : "Normal"; },
+        temp: function (s) { return s === "critical" ? "Fever" : s === "warning" ? "Fever"   : "Normal"; },
+        spo2: function (s) { return s === "critical" ? "Low"  : s === "warning" ? "Low"      : "Normal"; },
+      };
+      vitals.forEach(function (v) {
+        var el = document.getElementById(v.id);
+        var lbl = document.getElementById(v.labelId);
+        if (!el) return;
+        var raw = v.value && v.value !== "N/A" ? v.value : "";
+        var display = raw ? raw.replace(/[^0-9./]/g, "").trim() || "—" : "—";
+        el.textContent = display;
+        if (lbl && display !== "—") {
+          var status = vitalStatus(v.type, v.value);
+          lbl.textContent = VITAL_LABELS[v.type] ? VITAL_LABELS[v.type](status) : "";
+          lbl.className = "hv-label" + (status ? " hv-label--" + status : "");
+        }
+      });
+    }
+
+    // Active case card — always visible
+    var caseTitleEl  = document.getElementById("home-case-title");
+    var caseMetaEl   = document.getElementById("home-case-meta");
+    var caseBadgeEl  = document.getElementById("home-case-badge");
+    var continueBtn  = document.getElementById("home-continue-button");
+    var hasActiveCase = isProtocolTarget(state.selectedProtocol);
+    if (hasActiveCase) {
+      var activeProtocol = state.selectedProtocol;
+      var completed = state.stepCompletion.filter(Boolean).length;
+      var total     = state.stepCompletion.length;
+      if (caseTitleEl) caseTitleEl.textContent = "Probable " + activeProtocol;
+      if (caseMetaEl)  caseMetaEl.textContent  = total > 0
+        ? completed + " of " + total + " steps completed · Tap to resume"
+        : "Vitals captured — tap to start steps";
+      if (caseBadgeEl) caseBadgeEl.textContent = activeProtocol === "Septic Shock" ? "Critical" : "Active";
+      if (continueBtn) continueBtn.style.display = "";
+    } else {
+      var latestFinished = state.caseHistory && state.caseHistory.length ? state.caseHistory[0] : null;
+      if (caseTitleEl) caseTitleEl.textContent = latestFinished ? "No active case" : "No active case";
+      if (caseMetaEl) {
+        caseMetaEl.textContent = latestFinished
+          ? ("Last finished: " + latestFinished.protocol + " · " + new Date(latestFinished.finishedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+          : "Select an emergency below to begin";
+      }
+      if (caseBadgeEl) caseBadgeEl.textContent = latestFinished ? "Completed" : "";
+      if (continueBtn) continueBtn.style.display = "none";
+    }
+  }
+  refreshHomeDashboard();
+
+  // Home — Continue button
+  document.getElementById("home-continue-button").addEventListener("click", function () {
+    navigateTo("steps");
+  });
+
+
+  // Home — Quick emergency cards
+  document.querySelectorAll(".home-emg-card[data-protocol]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var protocol = btn.dataset.protocol;
+      if (isProtocolTarget(protocol)) {
+        startFreshProtocolCase(protocol);
+      } else {
+        state.selectedProtocol = protocol;
+      }
+      if (protocol === "Cardiac Arrest") {
+        renderSteps();
+        navigateTo("steps");
+        return;
+      }
+      navigateTo("vitals");
+    });
+  });
+
+  // Home — Tool cards
+  document.querySelectorAll(".home-tool-card[data-screen-target]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      navigateTo(btn.dataset.screenTarget);
+    });
+  });
+
+  // Home — View All
+  document.querySelector(".home-view-all[data-screen-target]")?.addEventListener("click", function (e) {
+    navigateTo(e.currentTarget.dataset.screenTarget);
+  });
+
 
   document.getElementById("confirm-vitals-button").addEventListener("click", function () {
     const record = getProtocolRecord(state.selectedProtocol);
-    record.transcript = transcriptPreview.value;
-    record.patient = parsePatientTranscript(record.transcript);
+    const consolidatedTranscript = buildTranscriptFromIntake(record);
+    record.transcript = consolidatedTranscript || transcriptPreview.value;
+
+    // use intake entries directly, don't re-parse transcript
+    VITAL_INTAKE_STEPS.forEach(function (step) {
+      const value = String(record.intakeEntries[step.key] || "").trim();
+      if (value && value !== "N/A") {
+        record.patient[step.key] = value;
+      }
+    });
+
     renderPatientInfo();
     navigateTo("patient");
   });
 
-  document.getElementById("start-assessment-button").addEventListener("click", function () {
-    renderSteps();
+  document.getElementById("start-assessment-button").addEventListener("click", async function () {
+    renderStepsLoading();
     navigateTo("steps");
+
+    var patient = getProtocolRecord(state.selectedProtocol).patient;
+    var prompt = buildStepsPrompt(patient);
+
+    try {
+      var result = await fetchJson(API.pipelineSteps, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: prompt })
+      }, true);
+
+      console.log("[Steps] Pipeline response:", result.llm_response);
+      var llmSteps = result.llm_response ? parseLLMSteps(result.llm_response) : null;
+      console.log("[Steps] Parsed steps:", llmSteps);
+      if (llmSteps && llmSteps.length > 0) {
+        var protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
+        var preCompleted = null;
+        _currentStepsRef = llmSteps;
+        renderStepsFromData(protocol.title, "Immediate - within 3 hours", llmSteps, preCompleted);
+      } else {
+        console.warn("[Steps] Could not parse LLM steps — falling back to hardcoded.");
+        renderSteps();
+      }
+    } catch (error) {
+      console.error("[Steps] Pipeline fetch failed:", error.message);
+      // Backend unavailable — fall back to hardcoded steps
+      renderSteps();
+    }
   });
 
   finishStepsButton.addEventListener("click", function () {
+    if (isProtocolTarget(state.selectedProtocol)) {
+      state.caseHistory.unshift({
+        protocol: state.selectedProtocol,
+        finishedAt: Date.now(),
+        completedSteps: state.stepCompletion.filter(Boolean).length,
+        totalSteps: state.stepCompletion.length
+      });
+      state.caseHistory = state.caseHistory.slice(0, 8);
+    }
+    if (isProtocolTarget(state.selectedProtocol)) {
+      state.protocolData[state.selectedProtocol] = createBlankProtocolRecord();
+    }
+    state.selectedProtocol = "";
+    state.stepCompletion = [];
+    state.teamAssignments = [];
+    state.protocolStartTime = null;
     navigateTo("home");
+    refreshHomeDashboard();
   });
 
   vitalsVoiceButton.addEventListener("click", function () {
     if (isProtocolTarget(state.selectedProtocol)) {
+      state.pendingProtocolMicSource = "top";
       toggleRecording(state.selectedProtocol);
     }
   });
+
+  intakeSaveStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    const capturedStep = getCurrentIntakeStep(record);
+    const saved = applyIntakeStepFromText(record, intakeStepInput.value);
+    if (saved) {
+      record.statusMessage = "Saved for " + capturedStep.label + ". Continue with the next vital.";
+      transcriptPreview.value = buildTranscriptFromIntake(record);
+      renderVitalsView();
+    }
+  });
+
+  intakePrevStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    if (record.intakeStepIndex > 0) {
+      record.intakeStepIndex -= 1;
+      renderVitalsView();
+    }
+  });
+
+  intakeNextStepButton.addEventListener("click", function () {
+    if (!isProtocolTarget(state.selectedProtocol)) {
+      return;
+    }
+    const record = getProtocolRecord(state.selectedProtocol);
+    if (record.intakeStepIndex < VITAL_INTAKE_STEPS.length - 1) {
+      record.intakeStepIndex += 1;
+      renderVitalsView();
+    }
+  });
+
+  intakeStepInput.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    intakeSaveStepButton.click();
+  });
+
+  intakeStepMicButton.addEventListener("click", function () {
+    state.pendingProtocolMicSource = "step";
+    toggleRecording(state.selectedProtocol);
+  });
+
+  transcriptToggle.addEventListener("click", function () {
+    const isOpen = transcriptToggle.classList.toggle("transcript-toggle--open");
+    transcriptPreview.classList.toggle("is-hidden", !isOpen);
+    transcriptToggle.querySelector("span").textContent = isOpen ? "Hide transcript" : "View transcript";
+  });
+
   voiceScreenButton.addEventListener("click", function () {
     toggleRecording("voice");
   });
@@ -1272,33 +2669,416 @@
     }
   });
 
-  calculateButton.addEventListener("click", function () {
-    const enteredWeight = Number(weightInput.value || 0);
-    const bolus = Number(bolusInput.value || 0);
-    const weightKg = unitSystemSelect.value === "metric" ? enteredWeight : poundsToKilograms(enteredWeight);
-    const total = weightKg * bolus;
-    const weightLabel = unitSystemSelect.value === "metric"
-      ? formatNumber(enteredWeight) + " kg"
-      : formatNumber(enteredWeight) + " lb";
-    calculatorResult.textContent = "Recommended bolus: " + total.toFixed(0) + " mL for " + weightLabel + " at " + bolus.toFixed(0) + " mL/kg";
+  // ── Dosing Calculator ────────────────────────────────────────────────────
+  (function () {
+    var calcCondition = "sepsis";
+
+    function calcWeightKg() {
+      var raw = parseFloat(document.getElementById("calc-weight").value) || 0;
+      var unit = document.getElementById("calc-weight-unit").value;
+      return unit === "lb" ? raw * 0.453592 : raw;
+    }
+
+    function resetResults() {
+      var resultCard  = document.getElementById("calc-result-card");
+      var pressorCard = document.getElementById("calc-pressor-card");
+      var cardiacDiv  = document.getElementById("calc-results-cardiac");
+      if (resultCard)  resultCard.classList.add("is-hidden");
+      if (pressorCard) pressorCard.classList.add("is-hidden");
+      if (cardiacDiv)  cardiacDiv.classList.add("is-hidden");
+    }
+
+    function doCalculate() {
+      var wKg = calcWeightKg();
+      if (wKg <= 0) return;
+
+      resetResults();
+
+      if (calcCondition === "cardiac-arrest") {
+        var epiEl    = document.getElementById("calc-epi-value");
+        var epiSub   = document.getElementById("calc-epi-sub");
+        var defibEl  = document.getElementById("calc-defib-value");
+        var defibSub = document.getElementById("calc-defib-sub");
+        var cardiacDiv = document.getElementById("calc-results-cardiac");
+
+        var epiDose = (wKg * 0.01).toFixed(2);
+        var epiVol  = ((wKg * 0.01) / 0.1).toFixed(1);
+        var defib1  = Math.round(wKg * 2);
+        var defib2  = Math.round(wKg * 4);
+
+        if (epiEl)    epiEl.textContent    = "Epinephrine: " + epiDose + " mg (" + epiVol + " mL of 0.1 mg/mL)";
+        if (epiSub)   epiSub.textContent   = "Every 3–5 min during arrest";
+        if (defibEl)  defibEl.textContent  = "Defibrillation: " + defib1 + " J → " + defib2 + " J";
+        if (defibSub) defibSub.textContent = "Initial " + defib1 + " J · Subsequent " + defib2 + " J";
+        if (cardiacDiv) cardiacDiv.classList.remove("is-hidden");
+      } else {
+        var dose    = parseFloat(document.getElementById("calc-dose-input").value) || 20;
+        var vol     = Math.round(wKg * dose);
+        var fluidEl = document.getElementById("calc-fluid-value");
+        var resultCard  = document.getElementById("calc-result-card");
+        var pressorCard = document.getElementById("calc-pressor-card");
+
+        if (fluidEl)   fluidEl.textContent = "Recommended bolus: " + vol + " mL";
+        if (resultCard) resultCard.classList.remove("is-hidden");
+        if (pressorCard) pressorCard.classList.toggle("is-hidden", calcCondition !== "septic-shock");
+      }
+    }
+
+    function switchCondition(cond) {
+      calcCondition = cond;
+      document.querySelectorAll(".calc-cond-btn").forEach(function (b) {
+        b.classList.toggle("calc-cond-btn--active", b.dataset.condition === cond);
+      });
+      var doseField = document.getElementById("calc-dose-field");
+      if (doseField) doseField.classList.toggle("is-hidden", cond === "cardiac-arrest");
+      resetResults();
+    }
+
+    // Condition buttons
+    document.querySelectorAll(".calc-cond-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () { switchCondition(btn.dataset.condition); });
+    });
+
+    // Calculate button
+    document.getElementById("calc-calculate-btn").addEventListener("click", doCalculate);
+
+    // Auto-select condition from active protocol when navigating to calculator
+    document.getElementById("screen-calculator").addEventListener("calc-enter", function () {
+      if (state.selectedProtocol) {
+        var p = state.selectedProtocol.toLowerCase();
+        if (p.includes("cardiac")) switchCondition("cardiac-arrest");
+        else if (p.includes("shock")) switchCondition("septic-shock");
+        else switchCondition("sepsis");
+      }
+      var rec = state.selectedProtocol && state.protocolData[state.selectedProtocol];
+      if (rec && rec.patient && rec.patient.weight) {
+        document.getElementById("calc-weight").value = rec.patient.weight;
+      }
+      resetResults();
+    });
+
+    switchCondition("sepsis");
+
+    // Standalone handheld calculator
+    (function () {
+      var display = document.getElementById("hh-display");
+      var current = "0", stored = null, op = null, fresh = false;
+
+      function show(val) {
+        var s = String(val);
+        if (s.length > 12) s = parseFloat(parseFloat(s).toPrecision(10)).toString();
+        display.textContent = s;
+      }
+
+      document.querySelectorAll(".hh-key").forEach(function (key) {
+        key.addEventListener("click", function () {
+          var k = key.dataset.hh;
+
+          if (k === "clear") {
+            current = "0"; stored = null; op = null; fresh = false; show("0"); return;
+          }
+          if (k === "sign") {
+            current = String(parseFloat(current) * -1); show(current); return;
+          }
+          if (k === "percent") {
+            current = String(parseFloat(current) / 100); show(current); return;
+          }
+          if (k === "+" || k === "-" || k === "*" || k === "/") {
+            stored = parseFloat(current); op = k; fresh = true; return;
+          }
+          if (k === "=") {
+            if (op === null || stored === null) return;
+            var a = stored, b = parseFloat(current), res;
+            if (op === "+") res = a + b;
+            else if (op === "-") res = a - b;
+            else if (op === "*") res = a * b;
+            else if (op === "/") res = b !== 0 ? a / b : "Error";
+            current = String(res); op = null; stored = null; fresh = false; show(current); return;
+          }
+          if (k === ".") {
+            if (fresh) { current = "0."; fresh = false; show(current); return; }
+            if (!current.includes(".")) current += ".";
+            show(current); return;
+          }
+          if (fresh) { current = k; fresh = false; }
+          else current = current === "0" ? k : current + k;
+          show(current);
+        });
+      });
+    }());
+  }());
+
+  // ── Notes ────────────────────────────────────────────────────────────────
+  (function () {
+    var notes = JSON.parse(localStorage.getItem("vc_notes") || "[]");
+    var editingId = null;
+
+    function saveToStorage() { localStorage.setItem("vc_notes", JSON.stringify(notes)); }
+
+    function renderNotes() {
+      var list  = document.getElementById("notes-list");
+      var empty = document.getElementById("notes-empty");
+      var cards = list.querySelectorAll(".note-card");
+      cards.forEach(function (c) { c.remove(); });
+      if (notes.length === 0) { empty.classList.remove("is-hidden"); return; }
+      empty.classList.add("is-hidden");
+      notes.slice().reverse().forEach(function (n) {
+        var card = document.createElement("div");
+        card.className = "note-card";
+        card.innerHTML =
+          '<button class="note-card__delete" data-id="' + n.id + '" aria-label="Delete note"><i class="fa-solid fa-trash"></i></button>' +
+          '<div class="note-card__title">' + (n.title || "Untitled") + "</div>" +
+          '<div class="note-card__preview">' + (n.body || "") + "</div>" +
+          '<div class="note-card__date">' + new Date(n.updatedAt).toLocaleDateString() + "</div>";
+        card.querySelector(".note-card__delete").addEventListener("click", function (e) {
+          e.stopPropagation();
+          notes = notes.filter(function (x) { return x.id !== n.id; });
+          saveToStorage(); renderNotes();
+        });
+        card.addEventListener("click", function () { openEditor(n); });
+        list.appendChild(card);
+      });
+    }
+
+    function openEditor(note) {
+      editingId = note ? note.id : null;
+      document.getElementById("notes-editor-title").value = note ? note.title : "";
+      document.getElementById("notes-editor-body").value  = note ? note.body  : "";
+      document.getElementById("notes-list").classList.add("is-hidden");
+      document.getElementById("notes-add-btn").classList.add("is-hidden");
+      document.getElementById("notes-editor").classList.remove("is-hidden");
+    }
+
+    function closeEditor() {
+      document.getElementById("notes-editor").classList.add("is-hidden");
+      document.getElementById("notes-list").classList.remove("is-hidden");
+      document.getElementById("notes-add-btn").classList.remove("is-hidden");
+      editingId = null;
+    }
+
+    document.getElementById("notes-add-btn").addEventListener("click", function () { openEditor(null); });
+
+    document.getElementById("notes-save-btn").addEventListener("click", function () {
+      var title = document.getElementById("notes-editor-title").value.trim();
+      var body  = document.getElementById("notes-editor-body").value.trim();
+      if (!title && !body) { closeEditor(); return; }
+      if (editingId) {
+        var n = notes.find(function (x) { return x.id === editingId; });
+        if (n) { n.title = title; n.body = body; n.updatedAt = Date.now(); }
+      } else {
+        notes.push({ id: Date.now().toString(), title: title, body: body, updatedAt: Date.now() });
+      }
+      saveToStorage(); renderNotes(); closeEditor();
+    });
+
+    document.getElementById("notes-cancel-btn").addEventListener("click", closeEditor);
+
+    renderNotes();
+  }());
+
+  // Profile save
+  document.getElementById("profile-save-btn").addEventListener("click", async function () {
+    var name = document.getElementById("profile-name-input").value.trim();
+    var role = document.getElementById("profile-role-input").value.trim();
+    var nameDisplay = document.getElementById("profile-name-display");
+    var roleDisplay = document.getElementById("profile-role-display");
+    if (nameDisplay && name) nameDisplay.textContent = name;
+    if (roleDisplay && role) roleDisplay.textContent = role;
+    var storageKey = getProfileStorageKey();
+    try {
+      if (storageKey) {
+        localStorage.setItem(storageKey, JSON.stringify({
+          name: name,
+          role: role,
+          institution: document.getElementById("profile-institution-input").value.trim(),
+          license: document.getElementById("profile-license-input").value.trim()
+        }));
+      }
+    } catch(e) {}
+    try {
+      if (isAuthenticated()) {
+        var updatedUser = await fetchJson(
+          API.authMe,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ full_name: name || null })
+          },
+          true
+        );
+        state.auth.user = updatedUser;
+        saveAuthSession();
+      }
+    } catch (e) {}
+    restoreAdminSettings();
+    renderLoginState();
+    navigateTo("home");
   });
 
-  document.querySelectorAll("[data-calc-value]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      appendToCalculator(button.dataset.calcValue);
-    });
+  profileLogoutButton.addEventListener("click", function () {
+    performLogout();
   });
 
-  document.querySelectorAll("[data-calc-action]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      if (button.dataset.calcAction === "clear") {
-        clearCalculator();
+  function getProfileDetails() {
+    var saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem("vitalcare_profile") || "null");
+    } catch (error) {}
+
+    return {
+      name: document.getElementById("profile-name-input").value.trim() || (saved && saved.name) || "Dr. User",
+      role: document.getElementById("profile-role-input").value.trim() || (saved && saved.role) || "Emergency Medicine",
+      institution: document.getElementById("profile-institution-input").value.trim() || (saved && saved.institution) || "",
+      license: document.getElementById("profile-license-input").value.trim() || (saved && saved.license) || ""
+    };
+  }
+
+  function getLoginSession() {
+    try {
+      return JSON.parse(localStorage.getItem("vitalcare_login") || "null");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function renderLoginState() {
+    var session = getLoginSession();
+    var profile = getProfileDetails();
+    var signedIn = !!(session && session.email);
+    var user = session && session.user;
+    var displayName = (user && user.full_name) || profile.name;
+    var displayRole = (user && user.role) || profile.role;
+
+    if (profileLoginStatus) {
+      profileLoginStatus.textContent = signedIn ? "Signed in as " + session.email : "Not signed in";
+    }
+    if (loginNameDisplay) {
+      loginNameDisplay.textContent = signedIn ? displayName : "Vital Care AI";
+    }
+    if (loginRoleDisplay) {
+      loginRoleDisplay.textContent = signedIn ? displayRole + (profile.institution ? " · " + profile.institution : "") : "Clinical workspace access";
+    }
+    if (loginEmailInput && signedIn) {
+      loginEmailInput.value = session.email;
+    }
+    if (loginStatusMessage) {
+      loginStatusMessage.textContent = signedIn
+        ? "Signed in locally. Profile and admin preferences are available on this device."
+        : "Sign in to sync your profile and admin tools.";
+      loginStatusMessage.classList.toggle("login-status-panel--success", signedIn);
+    }
+    if (adminNameDisplay) {
+      adminNameDisplay.textContent = signedIn ? displayName : "Admin Console";
+    }
+    if (adminAccessDisplay) {
+      adminAccessDisplay.textContent = signedIn ? "Signed in as " + session.email : "Local configuration";
+    }
+    if (profileAdminButton) {
+      profileAdminButton.style.display = isAdminUser() ? "" : "none";
+    }
+  }
+
+  function restoreAdminSettings() {
+    var profile = getProfileDetails();
+    try {
+      var saved = JSON.parse(localStorage.getItem("vitalcare_admin") || "null") || {};
+      adminInstitutionInput.value = saved.institution || profile.institution || "";
+      adminRoleSelect.value = saved.defaultRole || "Clinician";
+      adminProtocolReviewToggle.checked = saved.requireProtocolReview !== false;
+      adminAuditToggle.checked = saved.auditVoiceRequests !== false;
+      adminUsersCount.textContent = saved.usersCount || "12";
+    } catch (error) {
+      adminInstitutionInput.value = profile.institution || "";
+    }
+  }
+
+  loginSubmitButton.addEventListener("click", async function () {
+    var email = loginEmailInput.value.trim();
+    var password = loginPasswordInput.value.trim();
+    if (!email || !password) {
+      loginStatusMessage.textContent = "Enter an email and password to sign in.";
+      loginStatusMessage.classList.remove("login-status-panel--success");
+      return;
+    }
+
+    loginSubmitButton.disabled = true;
+    loginStatusMessage.textContent = "Signing in...";
+    loginStatusMessage.classList.remove("login-status-panel--success");
+
+    try {
+      var authPayload = null;
+      try {
+        authPayload = await loginWithBackend(email, password);
+      } catch (error) {
+        if (!/Failed to fetch|NetworkError|Load failed/i.test(error.message)) {
+          throw error;
+        }
       }
-      if (button.dataset.calcAction === "equals") {
-        evaluateCalculator();
-      }
-    });
+
+      localStorage.setItem("vitalcare_login", JSON.stringify({
+        email: email,
+        token: authPayload && authPayload.access_token,
+        access_token: authPayload && authPayload.access_token,
+        refresh_token: authPayload && authPayload.refresh_token,
+        user: authPayload && authPayload.user,
+        remember: !!loginRememberToggle.checked,
+        signedInAt: new Date().toISOString()
+      }));
+    } catch (error) {
+      loginStatusMessage.textContent = error.message || "Login failed.";
+      loginStatusMessage.classList.remove("login-status-panel--success");
+      loginSubmitButton.disabled = false;
+      return;
+    }
+
+    loginPasswordInput.value = "";
+    renderLoginState();
+    loginSubmitButton.disabled = false;
   });
+
+  loginSignoutButton.addEventListener("click", function () {
+    try {
+      localStorage.removeItem("vitalcare_login");
+    } catch (error) {}
+    loginPasswordInput.value = "";
+    renderLoginState();
+  });
+
+  adminGuidelineFileInput.addEventListener("change", function () {
+    var file = adminGuidelineFileInput.files && adminGuidelineFileInput.files[0];
+    if (!file) {
+      clearAdminGuidelineFile();
+      return;
+    }
+    adminGuidelineFileName.textContent = file.name;
+    renderGuidelineStatus(file.name + " is ready to upload.", false);
+  });
+
+  adminGuidelineClearButton.addEventListener("click", clearAdminGuidelineFile);
+  adminGuidelineUploadButton.addEventListener("click", uploadAdminGuideline);
+  adminGuidelineRefreshButton.addEventListener("click", loadAdminGuidelines);
+
+  adminSaveButton.addEventListener("click", function () {
+    try {
+      localStorage.setItem("vitalcare_admin", JSON.stringify({
+        institution: adminInstitutionInput.value.trim(),
+        defaultRole: adminRoleSelect.value,
+        requireProtocolReview: !!adminProtocolReviewToggle.checked,
+        auditVoiceRequests: !!adminAuditToggle.checked,
+        usersCount: adminUsersCount.textContent
+      }));
+    } catch (error) {}
+
+    var profileInstitutionInput = document.getElementById("profile-institution-input");
+    if (!profileInstitutionInput.value.trim() && adminInstitutionInput.value.trim()) {
+      profileInstitutionInput.value = adminInstitutionInput.value.trim();
+    }
+    renderLoginState();
+    navigateTo("profile");
+  });
+
+  restoreAdminSettings();
+  renderLoginState();
 
   textSizeSlider.addEventListener("input", function (event) {
     applyTextScale(Number(event.target.value));
@@ -1321,11 +3101,17 @@
 
   additionalInfo.addEventListener("change", function () {
     if (isProtocolTarget(state.selectedProtocol)) {
-      getProtocolRecord(state.selectedProtocol).patient.additionalInfo = additionalInfo.value;
+      const record = getProtocolRecord(state.selectedProtocol);
+      record.patient.additionalInfo = additionalInfo.value;
+      record.intakeEntries.additionalInfo = additionalInfo.value;
+      record.transcript = buildTranscriptFromIntake(record) || record.transcript;
     }
   });
 
+  restoreAuthSession();
+  loadProfileForCurrentUser();
   restoreState();
+  setAuthMode("login");
   renderPatientInfo();
   renderVitalsView();
   renderVoiceChat();
@@ -1334,9 +3120,29 @@
   updateCalculatorLabels();
   applyTextScale(Number(textSizeSlider.value));
   renderMicButtons("idle");
-  showScreen(state.currentScreen);
-  syncRecordingStatus();
-  syncLatestResult();
-  window.setInterval(syncRecordingStatus, 1500);
-  window.setInterval(syncLatestResult, 1500);
+  if (!isAuthenticated()) {
+    showScreen("auth");
+  } else {
+    if (state.currentScreen === "auth") {
+      state.currentScreen = "home";
+    }
+    showScreen(state.currentScreen);
+    function isUserTyping() {
+      return document.activeElement === intakeStepInput ||
+        document.activeElement === additionalInfo ||
+        document.activeElement === transcriptPreview ||
+        document.activeElement === voiceTextInput;
+    }
+    if (!syncLoopsStarted) {
+      syncLoopsStarted = true;
+      syncRecordingStatus();
+      syncLatestResult();
+      window.setInterval(function () {
+        if (!isUserTyping()) syncRecordingStatus();
+      }, 1500);
+      window.setInterval(function () {
+        if (!isUserTyping()) syncLatestResult();
+      }, 1500);
+    }
+  }
 })();
