@@ -3053,7 +3053,8 @@ body.theme-dark .login-status-panel--success {
   width: calc((100% - 1.07rem) / 2);
   height: calc(100% - 0.62rem);
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(163, 204, 233, 0.95) 0%, rgba(130, 181, 220, 0.95) 100%);
+  /* background: linear-gradient(180deg, rgba(163, 204, 233, 0.95) 0%, rgba(130, 181, 220, 0.95) 100%); */
+  background: var(--page-bg);
   border: 1px solid rgba(92, 144, 184, 0.5);
   box-shadow: 0 2px 6px rgba(72, 133, 186, 0.12);
   transition: left 220ms ease;
@@ -3079,7 +3080,7 @@ body.theme-dark .login-status-panel--success {
 .auth-tab--active {
   background: transparent;
   border-color: transparent;
-  color: #ffffff;
+  color: var(--text-muted);
 }
 
 .auth-subtitle {
@@ -3096,7 +3097,8 @@ body.theme-dark .login-status-panel--success {
 
 .auth-form .action-button {
   margin-top: 0.55rem;
-  background: linear-gradient(180deg, rgba(168, 206, 233, 0.98) 0%, rgba(139, 186, 221, 0.98) 100%);
+  /* background: linear-gradient(180deg, rgba(168, 206, 233, 0.98) 0%, rgba(139, 186, 221, 0.98) 100%); */
+  background: var(--page-bg);
   border: 1px solid rgba(102, 151, 190, 0.5);
   box-shadow: 0 2px 6px rgba(72, 133, 186, 0.12);
 }
