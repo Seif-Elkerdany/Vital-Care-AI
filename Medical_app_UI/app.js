@@ -416,6 +416,23 @@
     return !!(state.auth && state.auth.accessToken && state.auth.refreshToken);
   }
 
+  function isAdminUser() {
+    var rolesToCheck = [];
+    if (state.auth && state.auth.user && state.auth.user.role) {
+      rolesToCheck.push(String(state.auth.user.role));
+    }
+    var session = getLoginSession();
+    if (session && session.user && session.user.role) {
+      rolesToCheck.push(String(session.user.role));
+    }
+    if (session && session.role) {
+      rolesToCheck.push(String(session.role));
+    }
+    return rolesToCheck.some(function (role) {
+      return /admin/i.test(role);
+    });
+  }
+
   function getProfileStorageKey() {
     if (!state.auth || !state.auth.user) {
       return null;
@@ -541,11 +558,13 @@
   const adminGuidelineRefreshButton = document.getElementById("admin-guideline-refresh-btn");
   const adminGuidelineStatus = document.getElementById("admin-guideline-status");
   const adminGuidelineList = document.getElementById("admin-guideline-list");
+  const profileAdminButton = document.querySelector('.profile-action-card[data-screen-target="admin"]');
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
   const bottomNav = document.getElementById("bottom-nav");
   const authTabLogin = document.getElementById("auth-tab-login");
   const authTabRegister = document.getElementById("auth-tab-register");
+  const authTabs = document.querySelector(".auth-tabs");
   const authSubtitle = document.getElementById("auth-subtitle");
   const authStatus = document.getElementById("auth-status");
   const authLoginForm = document.getElementById("auth-login-form");
@@ -715,6 +734,9 @@
   function showScreen(name) {
     if (!isAuthenticated() && name !== "auth") {
       name = "auth";
+    }
+    if (name === "admin" && !isAdminUser()) {
+      name = "home";
     }
     if (name !== "settings") {
       stopMicThresholdTester();
@@ -1108,6 +1130,11 @@
   }
 
   function navigateTo(name) {
+    if (name === "admin" && !isAdminUser()) {
+      showScreen("home");
+      refreshHomeDashboard();
+      return;
+    }
     if (state.currentScreen && state.currentScreen !== name) {
       state.screenHistory.push(state.currentScreen);
     }
@@ -1759,6 +1786,9 @@
     const loginMode = mode !== "register";
     authTabLogin.classList.toggle("auth-tab--active", loginMode);
     authTabRegister.classList.toggle("auth-tab--active", !loginMode);
+    if (authTabs) {
+      authTabs.classList.toggle("auth-tabs--register", !loginMode);
+    }
     authLoginForm.classList.toggle("is-hidden", !loginMode);
     authRegisterForm.classList.toggle("is-hidden", loginMode);
     if (authSubtitle) {
@@ -1795,6 +1825,7 @@
       state.auth.refreshToken = payload.refresh_token || "";
       saveAuthSession();
       loadProfileForCurrentUser();
+      renderLoginState();
       ensureSyncLoops();
       setAuthStatus("", false);
       showScreen("home");
@@ -1832,6 +1863,7 @@
       state.auth.refreshToken = payload.refresh_token || "";
       saveAuthSession();
       loadProfileForCurrentUser();
+      renderLoginState();
       ensureSyncLoops();
       setAuthStatus("", false);
       showScreen("home");
@@ -1852,6 +1884,7 @@
     clearAuthSession();
     resetAuthForms();
     setAuthMode("login");
+    renderLoginState();
     showScreen("auth");
   }
 
@@ -2939,6 +2972,9 @@
     }
     if (adminAccessDisplay) {
       adminAccessDisplay.textContent = signedIn ? "Signed in as " + session.email : "Local configuration";
+    }
+    if (profileAdminButton) {
+      profileAdminButton.style.display = isAdminUser() ? "" : "none";
     }
   }
 
