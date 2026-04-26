@@ -13,7 +13,12 @@
     authLogin: "http://localhost:8000/auth/login",
     authRegister: "http://localhost:8000/auth/register",
     authLogout: "http://localhost:8000/auth/logout",
-    authMe: "http://localhost:8000/auth/me"
+    authMe: "http://localhost:8000/auth/me",
+    adminGuidelines: "http://localhost:8000/admin/guidelines",
+    adminGuidelineUpload: "http://localhost:8000/admin/guidelines/upload",
+    adminGuidelineDownload: function (documentId) {
+      return "http://localhost:8000/admin/guidelines/" + encodeURIComponent(documentId) + "/download";
+    }
   };
 
   const protocols = {
@@ -129,6 +134,8 @@
     guidelines: document.getElementById("screen-guidelines"),
     settings: document.getElementById("screen-settings"),
     profile: document.getElementById("screen-profile"),
+    login: document.getElementById("screen-login"),
+    admin: document.getElementById("screen-admin"),
     calculator: document.getElementById("screen-calculator"),
     notes: document.getElementById("screen-notes")
   };
@@ -510,6 +517,30 @@
   const voiceDebugMeta = document.getElementById("voice-debug-meta");
   const voiceDebugError = document.getElementById("voice-debug-error");
   const voiceDebugBody = document.getElementById("voice-debug-body");
+  const profileLoginStatus = document.getElementById("profile-login-status");
+  const loginNameDisplay = document.getElementById("login-name-display");
+  const loginRoleDisplay = document.getElementById("login-role-display");
+  const loginEmailInput = document.getElementById("login-email-input");
+  const loginPasswordInput = document.getElementById("login-password-input");
+  const loginRememberToggle = document.getElementById("login-remember-toggle");
+  const loginStatusMessage = document.getElementById("login-status-message");
+  const loginSubmitButton = document.getElementById("login-submit-btn");
+  const loginSignoutButton = document.getElementById("login-signout-btn");
+  const adminNameDisplay = document.getElementById("admin-name-display");
+  const adminAccessDisplay = document.getElementById("admin-access-display");
+  const adminUsersCount = document.getElementById("admin-users-count");
+  const adminInstitutionInput = document.getElementById("admin-institution-input");
+  const adminRoleSelect = document.getElementById("admin-role-select");
+  const adminProtocolReviewToggle = document.getElementById("admin-protocol-review-toggle");
+  const adminAuditToggle = document.getElementById("admin-audit-toggle");
+  const adminSaveButton = document.getElementById("admin-save-btn");
+  const adminGuidelineFileInput = document.getElementById("admin-guideline-file");
+  const adminGuidelineFileName = document.getElementById("admin-guideline-file-name");
+  const adminGuidelineUploadButton = document.getElementById("admin-guideline-upload-btn");
+  const adminGuidelineClearButton = document.getElementById("admin-guideline-clear-btn");
+  const adminGuidelineRefreshButton = document.getElementById("admin-guideline-refresh-btn");
+  const adminGuidelineStatus = document.getElementById("admin-guideline-status");
+  const adminGuidelineList = document.getElementById("admin-guideline-list");
   const speakerButtons = [voiceScreenButton, vitalsVoiceButton];
   const voiceTextInput = document.getElementById("voice-text-input");
   const bottomNav = document.getElementById("bottom-nav");
@@ -1095,6 +1126,9 @@
     if (name === "calculator") {
       var calcScreen = document.getElementById("screen-calculator");
       if (calcScreen) calcScreen.dispatchEvent(new CustomEvent("calc-enter"));
+    }
+    if (name === "admin") {
+      loadAdminGuidelines();
     }
   }
 
@@ -1819,6 +1853,182 @@
     resetAuthForms();
     setAuthMode("login");
     showScreen("auth");
+  }
+
+  function getAdminAuthHeaders() {
+    var session = getLoginSession();
+    var token = session && (session.token || session.access_token || session.accessToken);
+    return token ? { Authorization: "Bearer " + token } : {};
+  }
+
+  async function loginWithBackend(email, password) {
+    var response = await fetch(API.authLogin, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email, password: password })
+    });
+
+    if (response.status === 404 || response.status === 405) {
+      return null;
+    }
+    if (!response.ok) {
+      var payload = await response.json().catch(function () {
+        return {};
+      });
+      throw new Error(payload.detail || "Login failed.");
+    }
+    return response.json();
+  }
+
+  function renderGuidelineStatus(message, isSuccess) {
+    adminGuidelineStatus.textContent = message;
+    adminGuidelineStatus.classList.toggle("login-status-panel--success", !!isSuccess);
+  }
+
+  function formatGuidelineDate(value) {
+    if (!value) {
+      return "No upload date";
+    }
+    var date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+    return date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function renderAdminGuidelines(items) {
+    adminGuidelineList.innerHTML = "";
+    if (!items || !items.length) {
+      var empty = document.createElement("div");
+      empty.className = "admin-guideline-empty";
+      empty.textContent = "No indexed guideline PDFs yet.";
+      adminGuidelineList.appendChild(empty);
+      return;
+    }
+
+    items.forEach(function (item) {
+      var row = document.createElement("article");
+      row.className = "admin-guideline-row";
+
+      var copy = document.createElement("div");
+      copy.className = "admin-guideline-row__copy";
+
+      var title = document.createElement("strong");
+      title.textContent = item.document_name || item.title || "Guideline PDF";
+
+      var meta = document.createElement("small");
+      meta.textContent = [
+        item.protocol_version ? "v" + item.protocol_version : null,
+        item.status || null,
+        item.total_chunks ? item.total_chunks + " chunks" : null,
+        formatGuidelineDate(item.uploaded_at)
+      ].filter(Boolean).join(" · ");
+
+      copy.appendChild(title);
+      copy.appendChild(meta);
+
+      if (item.notification_message) {
+        var alert = document.createElement("small");
+        alert.className = "admin-guideline-row__alert";
+        alert.textContent = item.notification_message;
+        copy.appendChild(alert);
+      }
+
+      var download = document.createElement("button");
+      download.className = "admin-guideline-download";
+      download.type = "button";
+      download.setAttribute("aria-label", "Download " + (item.document_name || "guideline PDF"));
+      download.innerHTML = '<i class="fa-solid fa-download"></i>';
+      download.addEventListener("click", function () {
+        downloadAdminGuideline(item);
+      });
+
+      row.appendChild(copy);
+      row.appendChild(download);
+      adminGuidelineList.appendChild(row);
+    });
+  }
+
+  async function downloadAdminGuideline(item) {
+    renderGuidelineStatus("Preparing " + (item.document_name || "guideline PDF") + " for download...", false);
+    try {
+      var response = await fetch(API.adminGuidelineDownload(item.document_id), {
+        headers: getAdminAuthHeaders()
+      });
+      if (!response.ok) {
+        var payload = await response.json().catch(function () {
+          return {};
+        });
+        throw new Error(payload.detail || "Download failed.");
+      }
+      var blob = await response.blob();
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = url;
+      link.download = item.document_name || "guideline.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      renderGuidelineStatus("Downloaded " + (item.document_name || "guideline PDF") + ".", true);
+    } catch (error) {
+      renderGuidelineStatus(error.message || "Download failed.", false);
+    }
+  }
+
+  async function loadAdminGuidelines() {
+    renderGuidelineStatus("Loading indexed guideline PDFs...", false);
+    try {
+      var result = await fetchJson(API.adminGuidelines, {
+        headers: getAdminAuthHeaders()
+      });
+      renderAdminGuidelines(result.items || []);
+      renderGuidelineStatus("Guideline list is up to date.", true);
+    } catch (error) {
+      renderAdminGuidelines([]);
+      renderGuidelineStatus(error.message || "Could not load guidelines.", false);
+    }
+  }
+
+  function clearAdminGuidelineFile() {
+    adminGuidelineFileInput.value = "";
+    adminGuidelineFileName.textContent = "Select PDF guideline";
+    renderGuidelineStatus("No PDF selected.", false);
+  }
+
+  async function uploadAdminGuideline() {
+    var file = adminGuidelineFileInput.files && adminGuidelineFileInput.files[0];
+    if (!file) {
+      renderGuidelineStatus("Choose a PDF guideline before uploading.", false);
+      return;
+    }
+    if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+      renderGuidelineStatus("Only PDF guideline files can be uploaded.", false);
+      return;
+    }
+
+    var formData = new FormData();
+    formData.append("file", file);
+    adminGuidelineUploadButton.disabled = true;
+    renderGuidelineStatus("Uploading and indexing " + file.name + " into RAG...", false);
+
+    try {
+      var result = await fetchJson(API.adminGuidelineUpload, {
+        method: "POST",
+        headers: getAdminAuthHeaders(),
+        body: formData
+      });
+      clearAdminGuidelineFile();
+      renderGuidelineStatus(
+        "Uploaded " + (result.document_name || file.name) + " as guideline version " + (result.protocol_version || "new") + ".",
+        true
+      );
+      await loadAdminGuidelines();
+    } catch (error) {
+      renderGuidelineStatus(error.message || "Guideline upload failed.", false);
+    } finally {
+      adminGuidelineUploadButton.disabled = false;
+    }
   }
 
   async function toggleRecording(target) {
@@ -2667,12 +2877,172 @@
         saveAuthSession();
       }
     } catch (e) {}
+    restoreAdminSettings();
+    renderLoginState();
     navigateTo("home");
   });
 
   profileLogoutButton.addEventListener("click", function () {
     performLogout();
   });
+
+  function getProfileDetails() {
+    var saved = null;
+    try {
+      saved = JSON.parse(localStorage.getItem("vitalcare_profile") || "null");
+    } catch (error) {}
+
+    return {
+      name: document.getElementById("profile-name-input").value.trim() || (saved && saved.name) || "Dr. User",
+      role: document.getElementById("profile-role-input").value.trim() || (saved && saved.role) || "Emergency Medicine",
+      institution: document.getElementById("profile-institution-input").value.trim() || (saved && saved.institution) || "",
+      license: document.getElementById("profile-license-input").value.trim() || (saved && saved.license) || ""
+    };
+  }
+
+  function getLoginSession() {
+    try {
+      return JSON.parse(localStorage.getItem("vitalcare_login") || "null");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function renderLoginState() {
+    var session = getLoginSession();
+    var profile = getProfileDetails();
+    var signedIn = !!(session && session.email);
+    var user = session && session.user;
+    var displayName = (user && user.full_name) || profile.name;
+    var displayRole = (user && user.role) || profile.role;
+
+    if (profileLoginStatus) {
+      profileLoginStatus.textContent = signedIn ? "Signed in as " + session.email : "Not signed in";
+    }
+    if (loginNameDisplay) {
+      loginNameDisplay.textContent = signedIn ? displayName : "Vital Care AI";
+    }
+    if (loginRoleDisplay) {
+      loginRoleDisplay.textContent = signedIn ? displayRole + (profile.institution ? " · " + profile.institution : "") : "Clinical workspace access";
+    }
+    if (loginEmailInput && signedIn) {
+      loginEmailInput.value = session.email;
+    }
+    if (loginStatusMessage) {
+      loginStatusMessage.textContent = signedIn
+        ? "Signed in locally. Profile and admin preferences are available on this device."
+        : "Sign in to sync your profile and admin tools.";
+      loginStatusMessage.classList.toggle("login-status-panel--success", signedIn);
+    }
+    if (adminNameDisplay) {
+      adminNameDisplay.textContent = signedIn ? displayName : "Admin Console";
+    }
+    if (adminAccessDisplay) {
+      adminAccessDisplay.textContent = signedIn ? "Signed in as " + session.email : "Local configuration";
+    }
+  }
+
+  function restoreAdminSettings() {
+    var profile = getProfileDetails();
+    try {
+      var saved = JSON.parse(localStorage.getItem("vitalcare_admin") || "null") || {};
+      adminInstitutionInput.value = saved.institution || profile.institution || "";
+      adminRoleSelect.value = saved.defaultRole || "Clinician";
+      adminProtocolReviewToggle.checked = saved.requireProtocolReview !== false;
+      adminAuditToggle.checked = saved.auditVoiceRequests !== false;
+      adminUsersCount.textContent = saved.usersCount || "12";
+    } catch (error) {
+      adminInstitutionInput.value = profile.institution || "";
+    }
+  }
+
+  loginSubmitButton.addEventListener("click", async function () {
+    var email = loginEmailInput.value.trim();
+    var password = loginPasswordInput.value.trim();
+    if (!email || !password) {
+      loginStatusMessage.textContent = "Enter an email and password to sign in.";
+      loginStatusMessage.classList.remove("login-status-panel--success");
+      return;
+    }
+
+    loginSubmitButton.disabled = true;
+    loginStatusMessage.textContent = "Signing in...";
+    loginStatusMessage.classList.remove("login-status-panel--success");
+
+    try {
+      var authPayload = null;
+      try {
+        authPayload = await loginWithBackend(email, password);
+      } catch (error) {
+        if (!/Failed to fetch|NetworkError|Load failed/i.test(error.message)) {
+          throw error;
+        }
+      }
+
+      localStorage.setItem("vitalcare_login", JSON.stringify({
+        email: email,
+        token: authPayload && authPayload.access_token,
+        access_token: authPayload && authPayload.access_token,
+        refresh_token: authPayload && authPayload.refresh_token,
+        user: authPayload && authPayload.user,
+        remember: !!loginRememberToggle.checked,
+        signedInAt: new Date().toISOString()
+      }));
+    } catch (error) {
+      loginStatusMessage.textContent = error.message || "Login failed.";
+      loginStatusMessage.classList.remove("login-status-panel--success");
+      loginSubmitButton.disabled = false;
+      return;
+    }
+
+    loginPasswordInput.value = "";
+    renderLoginState();
+    loginSubmitButton.disabled = false;
+  });
+
+  loginSignoutButton.addEventListener("click", function () {
+    try {
+      localStorage.removeItem("vitalcare_login");
+    } catch (error) {}
+    loginPasswordInput.value = "";
+    renderLoginState();
+  });
+
+  adminGuidelineFileInput.addEventListener("change", function () {
+    var file = adminGuidelineFileInput.files && adminGuidelineFileInput.files[0];
+    if (!file) {
+      clearAdminGuidelineFile();
+      return;
+    }
+    adminGuidelineFileName.textContent = file.name;
+    renderGuidelineStatus(file.name + " is ready to upload.", false);
+  });
+
+  adminGuidelineClearButton.addEventListener("click", clearAdminGuidelineFile);
+  adminGuidelineUploadButton.addEventListener("click", uploadAdminGuideline);
+  adminGuidelineRefreshButton.addEventListener("click", loadAdminGuidelines);
+
+  adminSaveButton.addEventListener("click", function () {
+    try {
+      localStorage.setItem("vitalcare_admin", JSON.stringify({
+        institution: adminInstitutionInput.value.trim(),
+        defaultRole: adminRoleSelect.value,
+        requireProtocolReview: !!adminProtocolReviewToggle.checked,
+        auditVoiceRequests: !!adminAuditToggle.checked,
+        usersCount: adminUsersCount.textContent
+      }));
+    } catch (error) {}
+
+    var profileInstitutionInput = document.getElementById("profile-institution-input");
+    if (!profileInstitutionInput.value.trim() && adminInstitutionInput.value.trim()) {
+      profileInstitutionInput.value = adminInstitutionInput.value.trim();
+    }
+    renderLoginState();
+    navigateTo("profile");
+  });
+
+  restoreAdminSettings();
+  renderLoginState();
 
   textSizeSlider.addEventListener("input", function (event) {
     applyTextScale(Number(event.target.value));

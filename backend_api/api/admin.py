@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from backend_api.STT.schemas import (
     GuidelineDocumentResponse,
@@ -20,6 +23,34 @@ def build_admin_router(auth_service, invitation_service, rag_service):
         if rag_service is None:
             raise HTTPException(status_code=503, detail="RAG service is not available.")
         return rag_service
+
+    def guideline_file_response(document_id: str):
+        rag = require_rag_service()
+        documents = rag.list_documents(include_deleted=True)
+        document = next(
+            (
+                item
+                for item in documents
+                if str(item.get("document_id")) == document_id
+            ),
+            None,
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Guideline document was not found.")
+
+        file_location = document.get("file_url") or document.get("source_path")
+        if not file_location:
+            raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+        path = Path(str(file_location)).expanduser().resolve()
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=document.get("document_name") or f"{document_id}.pdf",
+        )
 
     @router.post("/invitations", response_model=AdminInvitationResponse)
     async def create_admin_invitation(
@@ -67,6 +98,11 @@ def build_admin_router(auth_service, invitation_service, rag_service):
         return GuidelineListResponse(
             items=rag.list_documents(include_deleted=include_deleted)
         )
+
+    @router.get("/guidelines/{document_id}/download")
+    async def download_guideline(document_id: str, user=Depends(admin_user)):
+        del user
+        return guideline_file_response(document_id)
 
     @router.post("/guidelines/{document_id}/approve", response_model=GuidelineDocumentResponse)
     async def approve_guideline(document_id: str, user=Depends(admin_user)):

@@ -1,6 +1,9 @@
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.responses import Response
 
 from backend_api.api.admin import build_admin_router
@@ -158,6 +161,34 @@ def create_app(
             rag = require_rag_service()
             return GuidelineListResponse(
                 items=rag.list_documents(include_deleted=include_deleted)
+            )
+
+        @app.get("/admin/guidelines/{document_id}/download")
+        async def download_guideline(document_id: str):
+            rag = require_rag_service()
+            document = next(
+                (
+                    item
+                    for item in rag.list_documents(include_deleted=True)
+                    if str(item.get("document_id")) == document_id
+                ),
+                None,
+            )
+            if document is None:
+                raise HTTPException(status_code=404, detail="Guideline document was not found.")
+
+            file_location = document.get("file_url") or document.get("source_path")
+            if not file_location:
+                raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+            path = Path(str(file_location)).expanduser().resolve()
+            if not path.is_file():
+                raise HTTPException(status_code=404, detail="Guideline PDF file is not available.")
+
+            return FileResponse(
+                path,
+                media_type="application/pdf",
+                filename=document.get("document_name") or f"{document_id}.pdf",
             )
 
     return app
