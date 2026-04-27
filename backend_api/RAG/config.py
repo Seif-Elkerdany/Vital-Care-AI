@@ -12,7 +12,7 @@ class RAGConfig:
     collection_name: str = os.getenv("QDRANT_COLLECTION", "medical_documents")
     embedding_model: str = os.getenv(
         "RAG_EMBEDDING_MODEL",
-        "sentence-transformers/embeddinggemma-300m-medical",
+        "NeuML/pubmedbert-base-embeddings",
     )
     chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "600"))
     chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "120"))
