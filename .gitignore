@@ -41,9 +41,6 @@ pytest-cache-files-*/
 Thumbs.db
 
 /stt/output_audio
-data/guidelines/
 Medical_app_UI/node_modules
 Medical_app_UI/dist/
 dist/
-
-surviving_sepsis_campaign_international_guidelines.651.pdf
