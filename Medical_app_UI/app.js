@@ -1904,8 +1904,25 @@
   }
 
   function getAdminAuthHeaders() {
-    var session = getLoginSession();
-    var token = session && (session.token || session.access_token || session.accessToken);
+    var token = "";
+    if (state.auth && typeof state.auth.accessToken === "string" && state.auth.accessToken) {
+      token = state.auth.accessToken;
+    }
+    if (!token) {
+      try {
+        var savedAuth = JSON.parse(window.localStorage.getItem(AUTH_STORAGE_KEY) || "null");
+        token =
+          (savedAuth &&
+            (savedAuth.accessToken || savedAuth.access_token || savedAuth.token)) ||
+          "";
+      } catch (error) {
+        token = "";
+      }
+    }
+    if (!token) {
+      var session = getLoginSession();
+      token = session && (session.token || session.access_token || session.accessToken);
+    }
     return token ? { Authorization: "Bearer " + token } : {};
   }
 
