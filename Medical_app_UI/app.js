@@ -1379,8 +1379,10 @@
 
   function buildStepsPrompt(patient) {
     const protocol = state.selectedProtocol || "Sepsis";
+    const protocolTiming = (protocols[protocol] || protocols.Sepsis).timing;
     return [
-      "You are a clinical decision support AI. Based on the patient vitals below, list exactly 5 to 7 numbered action steps a medical team should take within the first 3 hours for " + protocol + ".",
+      "You are a clinical decision support AI. Based on the patient vitals below, list exactly 5 to 7 numbered action steps a medical team should take for " + protocol + ".",
+      "Use this protocol timing target: " + protocolTiming + ".",
       "Format EACH step exactly as: [number]. [Short title]: [One or two sentence description].",
       "Output ONLY the numbered steps. No intro, no conclusion, no extra text.",
       "",
@@ -1485,7 +1487,7 @@
     }
   }
 
-  // ── Antibiotic countdown (3-hour window from protocol start) ─────────────
+  // ── Antibiotic countdown from protocol start ─────────────
   function startAbxCountdown(steps) {
     var hasAbxStep = steps.some(function (s, i) {
       return /antibiotic|antimicrobial|abx/i.test(s.title + " " + s.body) && !state.stepCompletion[i];
@@ -1495,11 +1497,12 @@
     if (!hasAbxStep) { card.classList.add("is-hidden"); return; }
     card.classList.remove("is-hidden");
 
-    var THREE_HOURS = 3 * 60 * 60 * 1000;
+    var deadlineHours = state.selectedProtocol === "Septic Shock" ? 1 : 3;
+    var deadlineMs = deadlineHours * 60 * 60 * 1000;
     if (state.abxCountdownInterval) clearInterval(state.abxCountdownInterval);
     state.abxCountdownInterval = setInterval(function () {
       var elapsed = Date.now() - (state.protocolStartTime || Date.now());
-      var remaining = Math.max(0, THREE_HOURS - elapsed);
+      var remaining = Math.max(0, deadlineMs - elapsed);
       var totalSec = Math.floor(remaining / 1000);
       var h = Math.floor(totalSec / 3600);
       var m = Math.floor((totalSec % 3600) / 60);
@@ -2597,7 +2600,7 @@
         var protocol = protocols[state.selectedProtocol] || protocols.Sepsis;
         var preCompleted = null;
         _currentStepsRef = llmSteps;
-        renderStepsFromData(protocol.title, "Immediate - within 3 hours", llmSteps, preCompleted);
+        renderStepsFromData(protocol.title, protocol.timing, llmSteps, preCompleted);
       } else {
         console.warn("[Steps] Could not parse LLM steps — falling back to hardcoded.");
         renderSteps();

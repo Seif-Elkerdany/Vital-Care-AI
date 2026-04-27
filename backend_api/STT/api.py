@@ -37,7 +37,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
-        stt_service.start_hotkey_listener()
         try:
             yield
         finally:

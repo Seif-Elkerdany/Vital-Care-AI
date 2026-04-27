@@ -7,7 +7,7 @@ from backend_api.STT import AppConfig, SpeechToTextService
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run STT API with M-hotkey recording.")
+    parser = argparse.ArgumentParser(description="Run STT API with microphone recording endpoints.")
     parser.add_argument(
         "--model",
         default=AppConfig.model_id,
@@ -217,7 +217,5 @@ def main() -> None:
 
     service = build_service(args)
     app = create_app(service)
-    print(
-        "Server starting. Focus this terminal and press M to start/stop recording, or POST /pipeline/text for typed input."
-    )
+    print("Server starting. Use the app record button or POST /recording/toggle to record.")
     uvicorn.run(app, host=args.host, port=args.port, reload=args.reload)

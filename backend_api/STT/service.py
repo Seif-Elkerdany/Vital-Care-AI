@@ -32,7 +32,6 @@ class SpeechToTextService:
         max_items: int = 100,
         engine: Optional[WhisperEngine] = None,
         recorder: Optional[AudioRecorder] = None,
-        hotkey: str = "m",
     ):
         self.engine = engine or WhisperEngine(model_id=model_id, language=language)
         self.llm_engine = llm_engine
@@ -42,7 +41,6 @@ class SpeechToTextService:
         self.tts_output_dir = Path(tts_output_dir).expanduser() if tts_output_dir else None
         self.recorder = recorder or AudioRecorder()
         self.max_items = max(1, max_items)
-        self.hotkey = hotkey.lower()
 
         self._items: deque[TranscriptionResult] = deque(maxlen=self.max_items)
         self._items_lock = threading.Lock()
@@ -56,28 +54,8 @@ class SpeechToTextService:
         self._listener = None
         self._listener_lock = threading.Lock()
 
-    def _load_keyboard_listener(self):
-        try:
-            from pynput import keyboard
-        except Exception as exc:
-            raise RuntimeError(
-                "Hotkey support requires the `pynput` package. Install STT dependencies first."
-            ) from exc
-        return keyboard.Listener
-
     def start_hotkey_listener(self):
-        try:
-            with self._listener_lock:
-                if self._listener is not None:
-                    return
-                listener_class = self._load_keyboard_listener()
-                self._listener = listener_class(on_press=self._on_key_press)
-                self._listener.start()
-            print(f"Hotkey ready. Press {self.hotkey.upper()} to start/stop recording.")
-        except Exception as exc:
-            self._last_error = f"Hotkey listener failed: {exc}"
-            self._last_event = "error"
-            print(self._last_error)
+        return None
 
     def stop_hotkey_listener(self):
         with self._listener_lock:
@@ -89,25 +67,6 @@ class SpeechToTextService:
 
         if self.recorder.recording:
             self.recorder.stop()
-
-    def _on_key_press(self, key):
-        char = getattr(key, "char", None)
-        if not char or char.lower() != self.hotkey:
-            return None
-
-        state = self.toggle_recording()
-        if state == "recording_started":
-            print(f"Recording... press {self.hotkey.upper()} again to stop.")
-        elif state == "transcribing":
-            print("Recording stopped. Transcribing...")
-        elif state == "busy":
-            print("Transcription is still running. Please wait.")
-        elif state == "no_audio":
-            print("No audio captured.")
-        elif state == "error":
-            print(f"Recording failed: {self._last_error}")
-
-        return None
 
     def toggle_recording(self, *, stt_only: bool = False):
         try:

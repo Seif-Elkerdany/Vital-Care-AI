@@ -38,7 +38,6 @@ This module uses:
 - Whisper for speech-to-text
 - FastAPI for the backend API
 - `sounddevice` for microphone capture
-- `pynput` for the keyboard hotkey listener
 
 Current defaults:
 - model: `openai/whisper-medium`
@@ -107,13 +106,12 @@ python main.py --disable-tts
 
 ## How Recording Works
 
-The STT module supports microphone recording with the `M` hotkey:
+The STT module supports microphone recording through the app record button or the recording API:
 
 1. Start the backend.
-2. Keep the terminal focused.
-3. Press `M` once to start recording.
-4. Press `M` again to stop recording.
-5. The audio is transcribed and then optionally sent to LLM, RAG, and TTS.
+2. Press the app record button, or call `POST /recording/toggle` once to start recording.
+3. Press the app record button again, or call `POST /recording/toggle` again to stop recording.
+4. The audio is transcribed and then optionally sent to LLM, RAG, and TTS.
 
 You can also send plain text directly through the API without using a microphone.
 
@@ -149,7 +147,7 @@ curl -X POST http://localhost:8000/pipeline/text \
 
 ## Notes
 
-- The `M` hotkey works on the machine running the backend, not from browser keyboard input.
+- Recording is started only from the app button or the recording API.
 - The first Whisper load may take time because the model can be downloaded on first run.
 - If microphone recording fails, check OS microphone permissions.
 - If TTS is enabled, the STT flow can save WAV and MP3 outputs for the latest response.
@@ -174,7 +172,6 @@ This module uses:
 - Whisper for speech-to-text
 - FastAPI for the backend API
 - `sounddevice` for microphone recording
-- `pynput` for the keyboard hotkey listener
 
 Current defaults:
 - Whisper model: `openai/whisper-medium`
@@ -243,13 +240,12 @@ python main.py --disable-tts
 
 ## How Recording Works
 
-The STT module supports microphone recording with the `M` hotkey:
+The STT module supports microphone recording through the app record button or the recording API:
 
 1. Start the backend.
-2. Keep the terminal focused.
-3. Press `M` once to start recording.
-4. Press `M` again to stop recording.
-5. The audio is transcribed and then optionally passed to LLM/RAG/TTS.
+2. Press the app record button, or call `POST /recording/toggle` once to start recording.
+3. Press the app record button again, or call `POST /recording/toggle` again to stop recording.
+4. The audio is transcribed and then optionally passed to LLM/RAG/TTS.
 
 You can also submit plain text directly through the API without using a microphone.
 
@@ -285,7 +281,7 @@ curl -X POST http://localhost:8000/pipeline/text \
 
 ## Notes
 
-- The microphone hotkey works on the machine running the backend, not from browser keyboard input.
+- Recording is started only from the app button or the recording API.
 - The first Whisper load can take time because the model may need to be downloaded.
 - If microphone capture fails, check OS microphone permissions.
 - If TTS is enabled, the STT response can also generate WAV and MP3 output paths.
