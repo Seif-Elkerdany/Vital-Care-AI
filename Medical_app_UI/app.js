@@ -2,22 +2,22 @@
   const STORAGE_KEY = "medapp-ui-state";
   const AUTH_STORAGE_KEY = "medapp-auth-session";
   const API = {
-    status: "http://localhost:8000/recording/status",
-    toggle: "http://localhost:8000/recording/toggle",
-    latestTranscription: "http://localhost:8000/transcriptions/latest",
-    latestResponse: "http://localhost:8000/responses/latest",
-    pipelineText: "http://localhost:8000/pipeline/text",
-    pipelineSteps: "http://localhost:8000/pipeline/steps",
-    latestAudio: "http://localhost:8000/responses/latest/audio/mp3",
-    toggleSttOnly: "http://localhost:8000/recording/toggle?stt_only=true",
-    authLogin: "http://localhost:8000/auth/login",
-    authRegister: "http://localhost:8000/auth/register",
-    authLogout: "http://localhost:8000/auth/logout",
-    authMe: "http://localhost:8000/auth/me",
-    adminGuidelines: "http://localhost:8000/admin/guidelines",
-    adminGuidelineUpload: "http://localhost:8000/admin/guidelines/upload",
+    status: "/api/recording/status",
+    toggle: "/api/recording/toggle",
+    latestTranscription: "/api/transcriptions/latest",
+    latestResponse: "/api/responses/latest",
+    pipelineText: "/api/pipeline/text",
+    pipelineSteps: "/api/pipeline/steps",
+    latestAudio: "/api/responses/latest/audio/mp3",
+    toggleSttOnly: "/api/recording/toggle?stt_only=true",
+    authLogin: "/api/auth/login",
+    authRegister: "/api/auth/register",
+    authLogout: "/api/auth/logout",
+    authMe: "/api/auth/me",
+    adminGuidelines: "/api/admin/guidelines",
+    adminGuidelineUpload: "/api/admin/guidelines/upload",
     adminGuidelineDownload: function (documentId) {
-      return "http://localhost:8000/admin/guidelines/" + encodeURIComponent(documentId) + "/download";
+      return "/api/admin/guidelines/" + encodeURIComponent(documentId) + "/download";
     }
   };
 
