@@ -28,4 +28,4 @@ ENV HF_HOME=/app/.cache/huggingface
 
 EXPOSE 8000
 
-CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m backend_api.db.seed_admin && python server.py --host 0.0.0.0 --port 8000"]
