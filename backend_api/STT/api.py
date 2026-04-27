@@ -1,7 +1,9 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.responses import Response
@@ -94,6 +96,38 @@ def create_app(
     @app.post("/pipeline/text", response_model=TranscriptionResult)
     async def process_text(body: TextInputRequest):
         return stt_service.process_text_input(body.text)
+
+    @app.post("/pipeline/audio", response_model=TranscriptionResult)
+    async def process_audio_upload(
+        file: UploadFile = File(...),
+        stt_only: bool = Query(default=False),
+    ):
+        raw = await file.read()
+        await file.close()
+
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y",
+            "-i", "pipe:0",
+            "-ar", "16000",
+            "-ac", "1",
+            "-f", "s16le",
+            "pipe:1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate(raw)
+        if proc.returncode != 0:
+            raise HTTPException(status_code=422, detail="Audio conversion failed.")
+
+        pcm = np.frombuffer(stdout, dtype=np.int16)
+        if pcm.size == 0:
+            raise HTTPException(status_code=422, detail="No audio data in uploaded file.")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: stt_service.process_audio(pcm, stt_only=stt_only)
+        )
 
     @app.post("/pipeline/steps", response_model=StepsResponse)
     async def generate_steps(body: TextInputRequest):

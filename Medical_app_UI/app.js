@@ -7,6 +7,7 @@
     latestTranscription: "/api/transcriptions/latest",
     latestResponse: "/api/responses/latest",
     pipelineText: "/api/pipeline/text",
+    pipelineAudio: "/api/pipeline/audio",
     pipelineSteps: "/api/pipeline/steps",
     latestAudio: "/api/responses/latest/audio/mp3",
     toggleSttOnly: "/api/recording/toggle?stt_only=true",
@@ -585,6 +586,12 @@
   let micThresholdAnalyser = null;
   let micThresholdAnimationFrame = null;
   let micThresholdData = null;
+
+  let browserMediaRecorder = null;
+  let browserAudioChunks = [];
+  let browserRecordingTarget = null;
+  let browserRecordingStream = null;
+  let browserRecordingActive = false;
 
   scalableTextElements.forEach(function (element) {
     const fontSize = parseFloat(window.getComputedStyle(element).fontSize);
@@ -2065,58 +2072,133 @@
   }
 
   async function toggleRecording(target) {
+    // Stop active browser recording
+    if (browserMediaRecorder && browserMediaRecorder.state !== "inactive") {
+      browserMediaRecorder.stop();
+      return;
+    }
+
     try {
+      browserRecordingTarget = target;
+      browserRecordingActive = true;
       state.pendingRecordingTarget = target;
-      const toggleUrl = isProtocolTarget(target) ? API.toggleSttOnly : API.toggle;
-      const result = await fetchJson(toggleUrl, { method: "POST" }, true);
-      if (result.state === "recording_started") {
-        renderMicButtons("recording");
-        if (isProtocolTarget(target)) {
-          getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
-          renderVitalsView();
-        } else {
-          state.chatData.statusMessage = "Recording now. Tap Stop Recording when you're finished speaking.";
-          renderVoiceChat();
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      browserRecordingStream = stream;
+      browserAudioChunks = [];
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : (MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "");
+      const recorderOptions = mimeType ? { mimeType: mimeType } : {};
+      const blobType = mimeType || "audio/webm";
+
+      browserMediaRecorder = new MediaRecorder(stream, recorderOptions);
+
+      browserMediaRecorder.ondataavailable = function (e) {
+        if (e.data && e.data.size > 0) {
+          browserAudioChunks.push(e.data);
         }
-      }
-      if (result.state === "transcribing") {
+      };
+
+      browserMediaRecorder.onstop = async function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        browserRecordingStream = null;
+
+        const blob = new Blob(browserAudioChunks, { type: blobType });
+        browserAudioChunks = [];
+        browserMediaRecorder = null;
+
+        const currentTarget = browserRecordingTarget;
+
+        if (blob.size < 500) {
+          browserRecordingTarget = null;
+          browserRecordingActive = false;
+          state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
+          renderMicButtons("idle");
+          const msg = "No audio captured. Please try again.";
+          if (isProtocolTarget(currentTarget)) {
+            getProtocolRecord(currentTarget).statusMessage = msg;
+            renderVitalsView();
+          } else {
+            state.chatData.statusMessage = msg;
+            renderVoiceChat();
+          }
+          return;
+        }
+
         renderMicButtons("transcribing");
-        if (isProtocolTarget(target)) {
-          getProtocolRecord(target).statusMessage = "Recording stopped. Transcribing and extracting vitals now.";
+        if (isProtocolTarget(currentTarget)) {
+          getProtocolRecord(currentTarget).statusMessage = "Transcribing and extracting vitals...";
           renderVitalsView();
         } else {
-          state.chatData.statusMessage = "Recording stopped. Backend is transcribing.";
+          state.chatData.statusMessage = "Transcribing your voice request...";
           renderVoiceChat();
         }
-      }
-      if (result.state === "busy") {
-        if (isProtocolTarget(target)) {
-          getProtocolRecord(target).statusMessage = "The backend is still processing the previous recording.";
-          renderVitalsView();
-        } else {
-          state.chatData.statusMessage = "The backend is still processing the previous recording.";
-          renderVoiceChat();
+
+        try {
+          const sttOnly = isProtocolTarget(currentTarget);
+          const formData = new FormData();
+          formData.append("file", blob, "recording.webm");
+
+          const headers = {};
+          if (state.auth && state.auth.accessToken) {
+            headers.Authorization = "Bearer " + state.auth.accessToken;
+          }
+
+          const response = await fetch(
+            "/api/pipeline/audio" + (sttOnly ? "?stt_only=true" : ""),
+            { method: "POST", headers: headers, body: formData }
+          );
+
+          if (!response.ok) {
+            const err = await response.json().catch(function () { return { detail: "Audio processing failed." }; });
+            throw new Error(err.detail || "Audio processing failed.");
+          }
+
+          browserRecordingTarget = null;
+          browserRecordingActive = false;
+          state.lastHandledAt = null;
+          // syncLatestResult will pick up the new transcription on its next poll
+        } catch (error) {
+          browserRecordingTarget = null;
+          browserRecordingActive = false;
+          state.pendingRecordingTarget = null;
+          state.pendingProtocolMicSource = null;
+          renderMicButtons("idle");
+          if (isProtocolTarget(currentTarget)) {
+            getProtocolRecord(currentTarget).statusMessage = error.message;
+            renderVitalsView();
+          } else {
+            state.chatData.statusMessage = error.message;
+            renderVoiceChat();
+          }
         }
-      }
-      if (result.state === "no_audio") {
-        state.pendingRecordingTarget = null;
-        state.pendingProtocolMicSource = null;
-        renderMicButtons("idle");
-        if (isProtocolTarget(target)) {
-          getProtocolRecord(target).statusMessage = "No audio captured. Please try again.";
-          renderVitalsView();
-        } else {
-          state.chatData.statusMessage = "No audio captured. Please try again.";
-          renderVoiceChat();
-        }
+      };
+
+      browserMediaRecorder.start();
+      renderMicButtons("recording");
+      if (isProtocolTarget(target)) {
+        getProtocolRecord(target).statusMessage = "Recording vitals now. Tap Stop Recording when the nurse finishes speaking.";
+        renderVitalsView();
+      } else {
+        state.chatData.statusMessage = "Recording now. Tap Stop Recording when you're finished speaking.";
+        renderVoiceChat();
       }
     } catch (error) {
-      const failedTarget = target;
+      browserRecordingTarget = null;
+      browserRecordingActive = false;
       state.pendingRecordingTarget = null;
       state.pendingProtocolMicSource = null;
+      if (browserRecordingStream) {
+        browserRecordingStream.getTracks().forEach(function (t) { t.stop(); });
+        browserRecordingStream = null;
+      }
+      browserMediaRecorder = null;
       renderMicButtons("idle");
-      if (isProtocolTarget(failedTarget)) {
-        getProtocolRecord(failedTarget).statusMessage = error.message;
+      if (isProtocolTarget(target)) {
+        getProtocolRecord(target).statusMessage = error.message;
         renderVitalsView();
       } else {
         state.chatData.statusMessage = error.message;
@@ -2126,6 +2208,7 @@
   }
 
   async function syncRecordingStatus() {
+    if (browserRecordingActive) return;
     try {
       const status = await fetchJson(API.status, undefined, true);
       const uiState = status.recording ? "recording" : (status.transcribing ? "transcribing" : "idle");
