@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend_api/ ./backend_api/
 COPY server.py .
-COPY data/ ./data/
+COPY pdf_guidelines/ ./pdf_guidelines/
 
 ENV PYTHONPATH=/app
 ENV HF_HOME=/app/.cache/huggingface

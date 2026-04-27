@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-GUIDELINES_DIR = Path(__file__).parent.parent.parent / "data" / "guidelines"
+GUIDELINES_DIR = Path(__file__).parent.parent.parent / "pdf_guidelines"
 
 
 def main() -> None:
