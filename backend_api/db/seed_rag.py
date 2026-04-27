@@ -9,12 +9,19 @@ GUIDELINES_DIR = Path(__file__).parent.parent.parent / "pdf_guidelines"
 def main() -> None:
     try:
         from backend_api.RAG import RAGService
+        from backend_api.db.factory import build_document_catalog
     except Exception as exc:
         print(f"RAG not available, skipping guideline seed: {exc}")
         return
 
     try:
-        rag = RAGService()
+        document_catalog = build_document_catalog()
+    except Exception as exc:
+        print(f"Could not connect to database, skipping guideline seed: {exc}")
+        return
+
+    try:
+        rag = RAGService(document_catalog=document_catalog)
     except Exception as exc:
         print(f"Could not connect to Qdrant, skipping guideline seed: {exc}")
         return
@@ -31,7 +38,12 @@ def main() -> None:
 
     for pdf in pdfs:
         try:
-            result = rag.add_pdf(pdf)
+            pdf_bytes = pdf.read_bytes()
+            result = rag.publish_guideline(
+                pdf_bytes,
+                original_filename=pdf.name,
+                auto_approve=True,
+            )
             print(f"Indexed guideline: {pdf.name} -> {result.get('document_id')}")
         except Exception as exc:
             print(f"Failed to index {pdf.name}: {exc}")
