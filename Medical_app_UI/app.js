@@ -902,14 +902,19 @@
     });
   }
 
-  function resetVoiceConversation() {
+  async function resetVoiceConversation() {
     state.chatData.summary = "";
     state.chatData.response = "Summary and next steps will appear here after transcription or chatbot response.";
     state.chatData.input = "";
     state.chatData.statusMessage = "";
     state.chatData.history = [];
     state.chatData.debugSnapshot = createBlankDebugSnapshot();
-    state.lastHandledAt = null;
+    try {
+      const latest = await fetchJson(API.latestTranscription, undefined, true);
+      state.lastHandledAt = latest && latest.created_at ? latest.created_at : null;
+    } catch (error) {
+      state.lastHandledAt = null;
+    }
     state.pendingRecordingTarget = null;
     state.pendingProtocolMicSource = null;
     if (state.activeAudio) {
@@ -2695,8 +2700,8 @@
     submitVoiceText();
   });
 
-  voiceClearButton.addEventListener("click", function () {
-    resetVoiceConversation();
+  voiceClearButton.addEventListener("click", async function () {
+    await resetVoiceConversation();
   });
 
   voiceDebugToggle.addEventListener("click", function () {
